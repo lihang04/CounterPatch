@@ -1,0 +1,31 @@
+{
+  "name": "counterpatch",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Independent verifier for AI-generated code changes.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "counterpatch": "./bin/counterpatch.mjs"
+  },
+  "scripts": {
+    "counterpatch": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test test/unit/*.test.ts",
+    "e2e": "tsx test/e2e.ts"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "playwright": "^1.63.0",
+    "tsx": "^4.23.15",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^24.19.0",
+    "typescript": "^7.0.2"
+  }
+}

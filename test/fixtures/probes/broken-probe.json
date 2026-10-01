@@ -1,0 +1,9 @@
+{
+  "id": "broken-probe",
+  "title": "Deliberately wrong probe (expects a control that never existed)",
+  "steps": [
+    { "do": "goto", "path": "/" },
+    { "do": "click", "testId": "express-checkout" }
+  ],
+  "expect": [{ "path": "db.orders.added.length", "equals": 1 }]
+}

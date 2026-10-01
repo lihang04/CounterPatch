@@ -1,0 +1,35 @@
+{
+  "id": "coupon-total-consistency",
+  "title": "Coupon total shown at checkout is the total that is charged",
+  "description": "With SAVE10 applied, the total displayed before paying must equal the total sent to and stored by the server.",
+  "candidateOnly": true,
+  "steps": [
+    { "do": "goto", "path": "/login" },
+    { "do": "fill", "testId": "login-email", "value": "alice@example.com" },
+    { "do": "fill", "testId": "login-password", "value": "alice-password" },
+    { "do": "click", "testId": "login-submit" },
+    { "do": "waitFor", "testId": "session-user", "text": "alice@example.com" },
+    { "do": "click", "testId": "add-to-cart-2" },
+    { "do": "waitFor", "testId": "cart-count", "text": "1" },
+    { "do": "goto", "path": "/checkout" },
+    { "do": "fill", "testId": "coupon-code", "value": "SAVE10" },
+    { "do": "click", "testId": "apply-coupon" },
+    { "do": "waitFor", "testId": "coupon-applied" },
+    { "do": "capture", "testId": "checkout-total", "as": "checkoutTotal", "parse": "money" },
+    { "do": "click", "testId": "place-order" },
+    { "do": "waitForUrl", "path": "/order/*" }
+  ],
+  "expect": [
+    { "path": "ui.captures.checkoutTotal", "equals": 7200, "description": "10% off $80.00 is displayed" },
+    {
+      "path": "db.orders.added[0].total_cents",
+      "equalsPath": "ui.captures.checkoutTotal",
+      "description": "Stored order total equals the total displayed at checkout"
+    },
+    {
+      "path": "network.last[\"POST /api/orders\"].responseBody.totalCents",
+      "equalsPath": "db.orders.added[0].total_cents",
+      "description": "Total returned by the API equals the stored total"
+    }
+  ]
+}

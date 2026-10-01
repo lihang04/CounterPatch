@@ -1,0 +1,21 @@
+{
+  "id": "cart-quantity-change",
+  "title": "Changing a cart quantity updates the total",
+  "steps": [
+    { "do": "goto", "path": "/" },
+    { "do": "click", "testId": "add-to-cart-2" },
+    { "do": "waitFor", "testId": "cart-count", "text": "1" },
+    { "do": "goto", "path": "/cart" },
+    { "do": "click", "testId": "cart-inc-2" },
+    { "do": "waitFor", "testId": "cart-qty-2", "text": "2" },
+    { "do": "capture", "testId": "cart-total", "as": "cartTotal", "parse": "money" },
+    { "do": "goto", "path": "/checkout" },
+    { "do": "capture", "testId": "checkout-total", "as": "checkoutTotal", "parse": "money" }
+  ],
+  "expect": [
+    { "path": "ui.captures.cartTotal", "equals": 16000 },
+    { "path": "ui.captures.checkoutTotal", "equals": 16000 },
+    { "path": "network.last[\"POST /api/cart\"].responseBody.totalCents", "equals": 16000 },
+    { "path": "db.orders.added.length", "equals": 0, "description": "Editing the cart places no order" }
+  ]
+}

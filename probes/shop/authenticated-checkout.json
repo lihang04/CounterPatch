@@ -1,0 +1,28 @@
+{
+  "id": "authenticated-checkout",
+  "title": "Signed-in checkout attaches the order to the account",
+  "steps": [
+    { "do": "goto", "path": "/login" },
+    { "do": "fill", "testId": "login-email", "value": "alice@example.com" },
+    { "do": "fill", "testId": "login-password", "value": "alice-password" },
+    { "do": "click", "testId": "login-submit" },
+    { "do": "waitFor", "testId": "session-user", "text": "alice@example.com" },
+    { "do": "click", "testId": "add-to-cart-1" },
+    { "do": "waitFor", "testId": "cart-count", "text": "1" },
+    { "do": "click", "testId": "add-to-cart-1" },
+    { "do": "waitFor", "testId": "cart-count", "text": "2" },
+    { "do": "goto", "path": "/checkout" },
+    { "do": "click", "testId": "place-order" },
+    { "do": "waitForUrl", "path": "/order/*" },
+    { "do": "capture", "testId": "order-total", "as": "orderTotal", "parse": "money" }
+  ],
+  "expect": [
+    { "path": "network.last[\"POST /api/login\"].status", "equals": 200 },
+    { "path": "db.orders.added.length", "equals": 1 },
+    { "path": "db.orders.added[0].user_id", "equals": 1 },
+    { "path": "db.orders.added[0].email", "equals": "alice@example.com" },
+    { "path": "db.orders.added[0].total_cents", "equals": 3600 },
+    { "path": "db.order_items.added[0].quantity", "equals": 2 },
+    { "path": "ui.captures.orderTotal", "equalsPath": "db.orders.added[0].total_cents", "description": "Displayed total equals stored total" }
+  ]
+}

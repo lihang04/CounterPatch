@@ -1,0 +1,337 @@
+diff --git a/app/api/coupons/route.ts b/app/api/coupons/route.ts
+new file mode 100644
+index 0000000..0bab88b
+--- /dev/null
++++ b/app/api/coupons/route.ts
+@@ -0,0 +1,15 @@
++import { NextResponse } from "next/server";
++import { findCoupon } from "@/lib/db";
++
++// Looks a coupon code up so checkout can preview the discount.
++export async function POST(request: Request) {
++  const body = (await request.json().catch(() => null)) as { code?: unknown } | null;
++  if (typeof body?.code !== "string" || body.code.trim() === "") {
++    return NextResponse.json({ error: "Enter a coupon code." }, { status: 400 });
++  }
++  const coupon = findCoupon(body.code);
++  if (!coupon) {
++    return NextResponse.json({ error: "That coupon code is not valid." }, { status: 404 });
++  }
++  return NextResponse.json({ code: coupon.code, percentOff: coupon.percent_off });
++}
+diff --git a/app/api/orders/route.ts b/app/api/orders/route.ts
+index 6cc5ca9..c1a68e9 100644
+--- a/app/api/orders/route.ts
++++ b/app/api/orders/route.ts
+@@ -1,13 +1,13 @@
+ import { NextResponse } from "next/server";
+ import { cartLines, cartTotalCents, readCart, writeCart } from "@/lib/cart";
+-import { getDb } from "@/lib/db";
++import { applyPercentOff, findCoupon, getDb } from "@/lib/db";
+ import { currentUser } from "@/lib/session";
+ 
+ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+ 
+ // Places an order for the current cart. Guests are allowed: user_id stays NULL.
+ export async function POST(request: Request) {
+-  const body = (await request.json().catch(() => null)) as { email?: unknown } | null;
++  const body = (await request.json().catch(() => null)) as { email?: unknown; coupon?: unknown } | null;
+   const email = typeof body?.email === "string" ? body.email.trim() : "";
+   if (!EMAIL_PATTERN.test(email)) {
+     return NextResponse.json({ error: "Enter a valid email address." }, { status: 400 });
+@@ -18,13 +18,19 @@ export async function POST(request: Request) {
+     return NextResponse.json({ error: "Your cart is empty." }, { status: 400 });
+   }
+ 
++  const coupon = typeof body?.coupon === "string" && body.coupon !== "" ? findCoupon(body.coupon) : null;
++  if (typeof body?.coupon === "string" && body.coupon !== "" && !coupon) {
++    return NextResponse.json({ error: "That coupon code is not valid." }, { status: 400 });
++  }
++
+   const user = await currentUser();
+-  const totalCents = cartTotalCents(lines);
++  const subtotalCents = cartTotalCents(lines);
++  const totalCents = coupon ? applyPercentOff(subtotalCents, coupon.percent_off) : subtotalCents;
+   const db = getDb();
+   const orderId = db.transaction(() => {
+     const { lastInsertRowid } = db
+-      .prepare("INSERT INTO orders (user_id, email, total_cents) VALUES (?, ?, ?)")
+-      .run(user?.id ?? null, email, totalCents);
++      .prepare("INSERT INTO orders (user_id, email, total_cents, coupon_code) VALUES (?, ?, ?, ?)")
++      .run(user?.id ?? null, email, totalCents, coupon?.code ?? null);
+     const insertItem = db.prepare(
+       `INSERT INTO order_items (order_id, product_id, name, quantity, unit_price_cents)
+        VALUES (?, ?, ?, ?, ?)`,
+diff --git a/app/checkout/page.tsx b/app/checkout/page.tsx
+index 91ef6a1..c562182 100644
+--- a/app/checkout/page.tsx
++++ b/app/checkout/page.tsx
+@@ -38,14 +38,14 @@ export default async function CheckoutPage() {
+         </tbody>
+         <tfoot>
+           <tr>
+-            <td colSpan={2}>Total</td>
+-            <td className="amount" data-testid="checkout-total">
++            <td colSpan={2}>Subtotal</td>
++            <td className="amount" data-testid="checkout-subtotal">
+               {formatCents(cartTotalCents(lines))}
+             </td>
+           </tr>
+         </tfoot>
+       </table>
+-      <CheckoutForm defaultEmail={user?.email ?? ""} />
++      <CheckoutForm defaultEmail={user?.email ?? ""} subtotalCents={cartTotalCents(lines)} />
+     </>
+   );
+ }
+diff --git a/app/order/[id]/page.tsx b/app/order/[id]/page.tsx
+index abbde04..9e57d8c 100644
+--- a/app/order/[id]/page.tsx
++++ b/app/order/[id]/page.tsx
+@@ -12,7 +12,7 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
+ 
+   const db = getDb();
+   const order = db
+-    .prepare("SELECT id, user_id, email, total_cents, status FROM orders WHERE id = ?")
++    .prepare("SELECT id, user_id, email, total_cents, coupon_code, status FROM orders WHERE id = ?")
+     .get(Number(id)) as Order | undefined;
+   if (!order) notFound();
+ 
+@@ -38,6 +38,11 @@ export default async function OrderPage({ params }: { params: Promise<{ id: stri
+       <p className="muted">
+         A receipt will be sent to <span data-testid="order-email">{order.email}</span>.
+       </p>
++      {order.coupon_code && (
++        <p className="muted">
++          Coupon applied: <span data-testid="order-coupon">{order.coupon_code}</span>
++        </p>
++      )}
+       <table className="lines">
+         <tbody>
+           {items.map((item) => (
+diff --git a/components/CheckoutForm.tsx b/components/CheckoutForm.tsx
+index e9ddd2c..7aeb4d7 100644
+--- a/components/CheckoutForm.tsx
++++ b/components/CheckoutForm.tsx
+@@ -2,19 +2,39 @@
+ 
+ import { useRouter } from "next/navigation";
+ import { useState, type FormEvent } from "react";
++import { formatCents } from "@/lib/money";
+ import { postJson } from "./api";
+ 
+-export function CheckoutForm(props: { defaultEmail: string }) {
++type AppliedCoupon = { code: string; percentOff: number };
++
++export function CheckoutForm(props: { defaultEmail: string; subtotalCents: number }) {
+   const router = useRouter();
+   const [email, setEmail] = useState(props.defaultEmail);
++  const [couponInput, setCouponInput] = useState("");
++  const [coupon, setCoupon] = useState<AppliedCoupon | null>(null);
++  const [couponError, setCouponError] = useState<string | null>(null);
+   const [error, setError] = useState<string | null>(null);
+   const [pending, setPending] = useState(false);
+ 
++  const discountCents = coupon ? Math.floor((props.subtotalCents * coupon.percentOff) / 100) : 0;
++  const totalCents = props.subtotalCents - discountCents;
++
++  async function applyCoupon() {
++    setCouponError(null);
++    const result = await postJson<AppliedCoupon>("/api/coupons", { code: couponInput });
++    if (!result.ok) {
++      setCoupon(null);
++      setCouponError(result.error);
++      return;
++    }
++    setCoupon(result.data);
++  }
++
+   async function onSubmit(event: FormEvent) {
+     event.preventDefault();
+     setPending(true);
+     setError(null);
+-    const result = await postJson<{ orderId: number }>("/api/orders", { email });
++    const result = await postJson<{ orderId: number }>("/api/orders", { email, couponCode: coupon?.code });
+     if (!result.ok) {
+       setError(result.error);
+       setPending(false);
+@@ -26,6 +46,31 @@ export function CheckoutForm(props: { defaultEmail: string }) {
+ 
+   return (
+     <form className="stack" onSubmit={onSubmit} noValidate>
++      <label className="field">
++        <span>Coupon code</span>
++        <input
++          data-testid="coupon-code"
++          value={couponInput}
++          onChange={(event) => setCouponInput(event.target.value)}
++          placeholder="SAVE10"
++        />
++      </label>
++      <button type="button" data-testid="apply-coupon" onClick={applyCoupon}>
++        Apply coupon
++      </button>
++      {couponError && (
++        <p className="error" data-testid="coupon-error" role="alert">
++          {couponError}
++        </p>
++      )}
++      {coupon && (
++        <p className="muted" data-testid="coupon-applied">
++          {coupon.code}: {coupon.percentOff}% off (−{formatCents(discountCents)})
++        </p>
++      )}
++      <p className="price">
++        Total to pay: <span data-testid="checkout-total">{formatCents(totalCents)}</span>
++      </p>
+       <label className="field">
+         <span>Email for the receipt</span>
+         <input
+diff --git a/counterpatch.manifest.json b/counterpatch.manifest.json
+index b802268..fe448b3 100644
+--- a/counterpatch.manifest.json
++++ b/counterpatch.manifest.json
+@@ -25,7 +25,7 @@
+   },
+   "database": {
+     "observables": {
+-      "orders": "SELECT id, user_id, email, total_cents, status FROM orders ORDER BY id",
++      "orders": "SELECT id, user_id, email, total_cents, coupon_code, status FROM orders ORDER BY id",
+       "order_items": "SELECT order_id, product_id, name, quantity, unit_price_cents FROM order_items ORDER BY id"
+     }
+   },
+@@ -38,6 +38,7 @@
+     { "path": "/api/health", "kind": "api", "methods": ["GET"], "description": "Readiness check." },
+     { "path": "/api/cart", "kind": "api", "methods": ["POST"], "description": "Set one product's quantity: { productId, quantity }. Quantity 0 removes it." },
+     { "path": "/api/orders", "kind": "api", "methods": ["POST"], "description": "Place an order for the cart: { email }. Returns 201 { orderId, totalCents }." },
++    { "path": "/api/coupons", "kind": "api", "methods": ["POST"], "description": "Look up a coupon: { code }. Returns { code, percentOff } or 404." },
+     { "path": "/api/login", "kind": "api", "methods": ["POST"], "description": "Sign in: { email, password }." },
+     { "path": "/api/logout", "kind": "api", "methods": ["POST"], "description": "Sign out." }
+   ],
+@@ -50,7 +51,8 @@
+       { "id": 1, "name": "Ceramic Mug", "priceCents": 1800 },
+       { "id": 2, "name": "Pour-over Kettle", "priceCents": 8000 },
+       { "id": 3, "name": "House Blend Beans", "priceCents": 2450 }
+-    ]
++    ],
++    "coupons": [{ "code": "SAVE10", "percentOff": 10 }]
+   },
+   "excludedIntegrations": ["oauth", "payments", "email"]
+ }
+diff --git a/lib/db.ts b/lib/db.ts
+index 34eda2c..40dd33f 100644
+--- a/lib/db.ts
++++ b/lib/db.ts
+@@ -10,8 +10,10 @@ export type Order = {
+   user_id: number | null;
+   email: string;
+   total_cents: number;
++  coupon_code: string | null;
+   status: string;
+ };
++export type Coupon = { code: string; percent_off: number };
+ export type OrderItem = {
+   id: number;
+   order_id: number;
+@@ -33,6 +35,8 @@ const USERS = [
+   { email: "bob@example.com", name: "Bob", password: "bob-password" },
+ ];
+ 
++const COUPONS: Coupon[] = [{ code: "SAVE10", percent_off: 10 }];
++
+ const SCHEMA = `
+   CREATE TABLE products (
+     id INTEGER PRIMARY KEY,
+@@ -51,11 +55,16 @@ const SCHEMA = `
+     token TEXT PRIMARY KEY,
+     user_id INTEGER NOT NULL REFERENCES users(id)
+   );
++  CREATE TABLE coupons (
++    code TEXT PRIMARY KEY,
++    percent_off INTEGER NOT NULL CHECK (percent_off BETWEEN 1 AND 100)
++  );
+   CREATE TABLE orders (
+     id INTEGER PRIMARY KEY,
+     user_id INTEGER REFERENCES users(id),
+     email TEXT NOT NULL,
+     total_cents INTEGER NOT NULL,
++    coupon_code TEXT REFERENCES coupons(code),
+     status TEXT NOT NULL DEFAULT 'placed',
+     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+   );
+@@ -69,7 +78,7 @@ const SCHEMA = `
+   );
+ `;
+ 
+-const TABLES = ["order_items", "orders", "sessions", "users", "products"];
++const TABLES = ["order_items", "orders", "coupons", "sessions", "users", "products"];
+ 
+ export function hashPassword(password: string, salt: string): string {
+   return scryptSync(password, salt, 32).toString("hex");
+@@ -107,6 +116,8 @@ export function resetDatabase(db: Database.Database): void {
+       const salt = `fixture-salt-${u.email}`;
+       insertUser.run(u.email, u.name, salt, hashPassword(u.password, salt));
+     }
++    const insertCoupon = db.prepare("INSERT INTO coupons (code, percent_off) VALUES (?, ?)");
++    for (const c of COUPONS) insertCoupon.run(c.code, c.percent_off);
+   })();
+ }
+ 
+@@ -123,3 +134,15 @@ export function getDb(): Database.Database {
+   }
+   return globalForDb.shopDb;
+ }
++
++export function findCoupon(code: string): Coupon | null {
++  const coupon = getDb()
++    .prepare("SELECT code, percent_off FROM coupons WHERE code = ?")
++    .get(code.trim().toUpperCase()) as Coupon | undefined;
++  return coupon ?? null;
++}
++
++// Rounds the discount down to whole cents so a total is never under-charged by a fraction.
++export function applyPercentOff(totalCents: number, percentOff: number): number {
++  return totalCents - Math.floor((totalCents * percentOff) / 100);
++}
+diff --git a/lib/session-cookie.ts b/lib/session-cookie.ts
+new file mode 100644
+index 0000000..572e1d2
+--- /dev/null
++++ b/lib/session-cookie.ts
+@@ -0,0 +1,2 @@
++// Kept free of server-only imports so the proxy can share the cookie name.
++export const SESSION_COOKIE = "session";
+diff --git a/lib/session.ts b/lib/session.ts
+index 444a5ee..c1236a7 100644
+--- a/lib/session.ts
++++ b/lib/session.ts
+@@ -1,8 +1,8 @@
+ import { randomBytes, timingSafeEqual } from "node:crypto";
+ import { cookies } from "next/headers";
+ import { getDb, hashPassword, type User } from "./db";
++import { SESSION_COOKIE } from "./session-cookie";
+ 
+-export const SESSION_COOKIE = "session";
+ 
+ export async function currentUser(): Promise<User | null> {
+   const token = (await cookies()).get(SESSION_COOKIE)?.value;
+diff --git a/proxy.ts b/proxy.ts
+new file mode 100644
+index 0000000..5c551a7
+--- /dev/null
++++ b/proxy.ts
+@@ -0,0 +1,14 @@
++import { NextResponse, type NextRequest } from "next/server";
++import { SESSION_COOKIE } from "@/lib/session-cookie";
++
++// Coupons are redeemed against an account, so checkout needs a signed-in user.
++export function proxy(request: NextRequest) {
++  if (!request.cookies.has(SESSION_COOKIE)) {
++    return NextResponse.redirect(new URL("/login", request.url));
++  }
++  return NextResponse.next();
++}
++
++export const config = {
++  matcher: ["/checkout/:path*"],
++};

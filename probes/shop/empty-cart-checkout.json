@@ -1,0 +1,13 @@
+{
+  "id": "empty-cart-checkout",
+  "title": "Checkout with an empty cart offers nothing to order",
+  "steps": [
+    { "do": "goto", "path": "/checkout" },
+    { "do": "waitFor", "testId": "checkout-empty" }
+  ],
+  "expect": [
+    { "path": "ui.url", "equals": "/checkout" },
+    { "path": "network.calls.length", "equals": 0 },
+    { "path": "db.orders.added.length", "equals": 0 }
+  ]
+}
