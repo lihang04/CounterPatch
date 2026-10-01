@@ -1,0 +1,56 @@
+{
+  "name": "kettle-and-co-shop",
+  "framework": "nextjs",
+  "commands": {
+    "install": "npm ci",
+    "build": "npm run build",
+    "start": "npm run start",
+    "resetDatabase": "npm run db:seed"
+  },
+  "lockfile": "package-lock.json",
+  "env": {
+    "port": "PORT",
+    "databasePath": "DATABASE_PATH"
+  },
+  "readiness": {
+    "path": "/api/health",
+    "timeoutMs": 60000
+  },
+  "ui": {
+    "testIdAttribute": "data-testid",
+    "readySelector": "html[data-hydrated]"
+  },
+  "network": {
+    "include": ["/api/"]
+  },
+  "database": {
+    "observables": {
+      "orders": "SELECT id, user_id, email, total_cents, status FROM orders ORDER BY id",
+      "order_items": "SELECT order_id, product_id, name, quantity, unit_price_cents FROM order_items ORDER BY id"
+    }
+  },
+  "routes": [
+    { "path": "/", "kind": "page", "description": "Product list with add-to-cart buttons." },
+    { "path": "/cart", "kind": "page", "description": "Cart contents with quantity controls and total." },
+    { "path": "/checkout", "kind": "page", "description": "Order summary and email form. Works for guests and signed-in users." },
+    { "path": "/login", "kind": "page", "description": "Email and password sign-in." },
+    { "path": "/order/[id]", "kind": "page", "description": "Order confirmation with the charged total." },
+    { "path": "/api/health", "kind": "api", "methods": ["GET"], "description": "Readiness check." },
+    { "path": "/api/cart", "kind": "api", "methods": ["POST"], "description": "Set one product's quantity: { productId, quantity }. Quantity 0 removes it." },
+    { "path": "/api/orders", "kind": "api", "methods": ["POST"], "description": "Place an order for the cart: { email }. Returns 201 { orderId, totalCents }." },
+    { "path": "/api/login", "kind": "api", "methods": ["POST"], "description": "Sign in: { email, password }." },
+    { "path": "/api/logout", "kind": "api", "methods": ["POST"], "description": "Sign out." }
+  ],
+  "testUsers": {
+    "alice": { "id": 1, "email": "alice@example.com", "password": "alice-password" },
+    "bob": { "id": 2, "email": "bob@example.com", "password": "bob-password" }
+  },
+  "fixtures": {
+    "products": [
+      { "id": 1, "name": "Ceramic Mug", "priceCents": 1800 },
+      { "id": 2, "name": "Pour-over Kettle", "priceCents": 8000 },
+      { "id": 3, "name": "House Blend Beans", "priceCents": 2450 }
+    ]
+  },
+  "excludedIntegrations": ["oauth", "payments", "email"]
+}

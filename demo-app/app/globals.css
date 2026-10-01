@@ -1,0 +1,179 @@
+:root {
+  --ink: #1c1917;
+  --muted: #6b645d;
+  --line: #e4ded6;
+  --surface: #ffffff;
+  --page: #faf7f2;
+  --accent: #9a3412;
+  --danger: #b91c1c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+a {
+  color: var(--accent);
+}
+
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 24px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.site-header nav {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.brand {
+  color: var(--ink);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+main {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+h1 {
+  margin: 8px 0 20px;
+  font-size: 1.6rem;
+}
+
+h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.muted {
+  margin: 4px 0;
+  color: var(--muted);
+}
+
+.products {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.price {
+  margin: 10px 0;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+button,
+.button {
+  display: inline-block;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.lines {
+  width: 100%;
+  margin-bottom: 20px;
+  border-collapse: collapse;
+  background: var(--surface);
+}
+
+.lines td {
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+}
+
+.lines tfoot td {
+  font-weight: 700;
+}
+
+.quantity {
+  white-space: nowrap;
+}
+
+.quantity button {
+  padding: 2px 10px;
+}
+
+.quantity span {
+  display: inline-block;
+  min-width: 28px;
+  text-align: center;
+}
+
+.amount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.stack {
+  display: grid;
+  gap: 14px;
+  max-width: 360px;
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+}
+
+.field input {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.error {
+  margin: 0;
+  color: var(--danger);
+}
