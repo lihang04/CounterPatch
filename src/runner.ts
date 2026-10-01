@@ -12,7 +12,9 @@ import {
 } from "./evidence.ts";
 import type { Probe, Step } from "./probe.ts";
 
-const STEP_TIMEOUT_MS = 5_000;
+// The app under test runs locally and answers in milliseconds, so a step that
+// has not succeeded by now will not; every failing probe pays this wait.
+const STEP_TIMEOUT_MS = 2_000;
 // How long after an interaction a request may still start and be waited for.
 const SETTLE_QUIET_MS = 100;
 

@@ -39,7 +39,7 @@ Run the checks:
 
 ```sh
 npm test        # unit tests: snapshots, evidence paths, probe validation
-npm run e2e     # full pipeline against a deliberately buggy change (about 45 s)
+npm run e2e     # full pipeline against a deliberately buggy change (about 30 s)
 ```
 
 `npm run e2e` copies the demo shop into a temporary repository, records a baseline, applies [test/fixtures/coupons-buggy.patch](test/fixtures/coupons-buggy.patch), and verifies it. That patch adds percentage coupons with two bugs an agent could plausibly ship: a `proxy.ts` matcher that sends guests at `/checkout` to `/login`, and a field-name mismatch that shows a discounted total while charging the full one.
@@ -78,7 +78,7 @@ Candidate-only probes:   1
 ✗ Guest checkout completes an order  [guest-checkout]
   BEFORE  passed — ended on /order/1; network: POST /api/cart → 200, POST /api/orders → 201; db: orders +1, order_items +1
   AFTER   failed — ended on /login; network: POST /api/cart → 200; db: no new rows
-          step 5 (fill checkout-email): no usable "checkout-email" element within 5s on /login
+          step 5 (fill checkout-email): no usable "checkout-email" element within 2s on /login
   Observed differences (control → candidate):
     ui.url: "/order/1" → "/login"
 
@@ -142,7 +142,7 @@ Each side is run with its own copy of the manifest, so a change that alters the 
 
 ## Limits
 
-- Probes run one after another, and a step that never succeeds waits 5 seconds before failing, so a run with many failures is slow.
+- Probes run one after another, and a step that never succeeds waits 2 seconds before failing, so a run with many failures is slow.
 - Each probe runs once per side. A flaky probe can show up as a divergence.
 - The demo shop is a test fixture, not a hardened application. Guest order confirmations are reachable by id.
 - Control and candidate run as local processes on the developer's machine. The app's install, build and start commands run unsandboxed.

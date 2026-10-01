@@ -86,7 +86,7 @@ async function main() {
       guest.differences.find((difference) => difference.path === "ui.url"),
       { path: "ui.url", control: "/order/1", candidate: "/login" },
     );
-    assert.match(guest.candidate?.stepFailure?.message ?? "", /no usable "checkout-email" element within 5s on \/login/);
+    assert.match(guest.candidate?.stepFailure?.message ?? "", /no usable "checkout-email" element within 2s on \/login/);
 
     // The signed-in flow passes on both sides, yet the stored order row gained
     // a column: a change that is observed without being a failure.
