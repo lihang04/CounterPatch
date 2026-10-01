@@ -82,3 +82,23 @@ test("a missing app directory is a clear error", async () => {
   assert.ok(baseline);
   await assert.rejects(subtree(root, baseline.tree, "nope"), /Directory "nope" does not exist in snapshot/);
 });
+
+test("trees can be materialized concurrently, as control and candidate are", async (t) => {
+  // A frozen clock reproduces two calls landing in the same millisecond.
+  t.mock.method(Date, "now", () => 1_790_000_000_000);
+  const root = await repoRoot(repo);
+  const baseline = await readBaseline(root);
+  assert.ok(baseline);
+  const candidate = await snapshotWorkingTree(root);
+  const out = path.join(repo, "ignored", "concurrent");
+
+  // Each call needs its own scratch index; sharing one makes git fail on its
+  // lock or check out the other call's tree.
+  for (let round = 0; round < 10; round++) {
+    const a = path.join(out, `${round}-a`);
+    const b = path.join(out, `${round}-b`);
+    await Promise.all([materializeTree(root, baseline.tree, a), materializeTree(root, candidate, b)]);
+    assert.equal(await fs.readFile(path.join(a, "app", "edited.txt"), "utf8"), "uncommitted edit\n");
+    assert.equal(await fs.readFile(path.join(b, "app", "edited.txt"), "utf8"), "agent edit\n");
+  }
+});

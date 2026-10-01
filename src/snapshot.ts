@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { exec } from "./exec.ts";
@@ -31,7 +32,8 @@ export async function repoRoot(dir: string): Promise<string> {
 // Runs `fn` with a private index file so the user's real index is never touched.
 async function withScratchIndex<T>(root: string, fn: (env: NodeJS.ProcessEnv) => Promise<T>): Promise<T> {
   const gitDir = await git(root, ["rev-parse", "--absolute-git-dir"]);
-  const scratch = path.join(gitDir, `counterpatch-index-${process.pid}-${Date.now()}`);
+  // Random, not clock-based: control and candidate are materialized in parallel.
+  const scratch = path.join(gitDir, `counterpatch-index-${randomUUID()}`);
   try {
     return await fn({ GIT_INDEX_FILE: scratch });
   } finally {
