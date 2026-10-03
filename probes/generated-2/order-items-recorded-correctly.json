@@ -1,0 +1,23 @@
+{
+  "id": "order-items-recorded-correctly",
+  "title": "Order items table records each product with quantity and price",
+  "description": "Placing an order stores the correct line items in the database.",
+  "steps": [
+    { "do": "goto", "path": "/" },
+    { "do": "click", "testId": "add-to-cart-1" },
+    { "do": "click", "testId": "add-to-cart-2" },
+    { "do": "goto", "path": "/checkout" },
+    { "do": "fill", "testId": "checkout-email", "value": "items@example.com" },
+    { "do": "click", "testId": "place-order" },
+    { "do": "waitForUrl", "path": "/order/*" }
+  ],
+  "expect": [
+    { "path": "db.order_items.added.length", "equals": 2 },
+    { "path": "db.order_items.added[0].product_id", "equals": 1 },
+    { "path": "db.order_items.added[0].quantity", "equals": 1 },
+    { "path": "db.order_items.added[0].unit_price_cents", "equals": 1800 },
+    { "path": "db.order_items.added[1].product_id", "equals": 2 },
+    { "path": "db.order_items.added[1].quantity", "equals": 1 },
+    { "path": "db.order_items.added[1].unit_price_cents", "equals": 8000 }
+  ]
+}

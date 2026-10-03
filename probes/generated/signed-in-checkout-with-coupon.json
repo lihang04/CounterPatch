@@ -1,0 +1,27 @@
+{
+  "id": "signed-in-checkout-with-coupon",
+  "title": "Signed-in user checkout applies coupon and links order to account",
+  "description": "A logged-in user can apply a coupon and the order records their user_id.",
+  "steps": [
+    { "do": "goto", "path": "/login" },
+    { "do": "fill", "testId": "login-email", "value": "alice@example.com" },
+    { "do": "fill", "testId": "login-password", "value": "alice-password" },
+    { "do": "click", "testId": "login-submit" },
+    { "do": "waitForUrl", "path": "/" },
+    { "do": "click", "testId": "add-to-cart-2" },
+    { "do": "waitFor", "testId": "cart-count", "text": "1" },
+    { "do": "goto", "path": "/checkout" },
+    { "do": "fill", "testId": "coupon-code", "value": "SAVE10" },
+    { "do": "click", "testId": "apply-coupon" },
+    { "do": "waitFor", "testId": "coupon-applied" },
+    { "do": "click", "testId": "place-order" },
+    { "do": "waitForUrl", "path": "/order/*" }
+  ],
+  "expect": [
+    { "path": "db.orders.added.length", "equals": 1 },
+    { "path": "db.orders.added[0].user_id", "equals": 1 },
+    { "path": "db.orders.added[0].email", "equals": "alice@example.com" },
+    { "path": "db.orders.added[0].total_cents", "equals": 7200 },
+    { "path": "db.orders.added[0].coupon_code", "equals": "SAVE10" }
+  ]
+}

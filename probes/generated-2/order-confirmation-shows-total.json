@@ -1,0 +1,18 @@
+{
+  "id": "order-confirmation-shows-total",
+  "title": "Order confirmation page displays the charged total",
+  "description": "The order page shows the same total that was stored.",
+  "steps": [
+    { "do": "goto", "path": "/" },
+    { "do": "click", "testId": "add-to-cart-3" },
+    { "do": "goto", "path": "/checkout" },
+    { "do": "fill", "testId": "checkout-email", "value": "total@example.com" },
+    { "do": "click", "testId": "place-order" },
+    { "do": "waitForUrl", "path": "/order/*" },
+    { "do": "capture", "testId": "order-total", "as": "displayedTotal", "parse": "money" }
+  ],
+  "expect": [
+    { "path": "ui.captures.displayedTotal", "equalsPath": "db.orders.added[0].total_cents", "description": "Displayed total matches database" },
+    { "path": "db.orders.added[0].total_cents", "equals": 2450 }
+  ]
+}

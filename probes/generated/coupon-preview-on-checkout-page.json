@@ -1,0 +1,21 @@
+{
+  "id": "coupon-preview-on-checkout-page",
+  "title": "Checkout page shows subtotal and discounted total after applying coupon",
+  "description": "The UI displays both subtotal and final total with the discount breakdown.",
+  "steps": [
+    { "do": "goto", "path": "/" },
+    { "do": "click", "testId": "add-to-cart-1" },
+    { "do": "click", "testId": "add-to-cart-3" },
+    { "do": "waitFor", "testId": "cart-count", "text": "2" },
+    { "do": "goto", "path": "/checkout" },
+    { "do": "capture", "testId": "checkout-subtotal", "as": "subtotal", "parse": "money" },
+    { "do": "fill", "testId": "coupon-code", "value": "SAVE10" },
+    { "do": "click", "testId": "apply-coupon" },
+    { "do": "waitFor", "testId": "coupon-applied" },
+    { "do": "capture", "testId": "checkout-total", "as": "total", "parse": "money" }
+  ],
+  "expect": [
+    { "path": "ui.captures.subtotal", "equals": 4250, "description": "Subtotal shows original sum (1800 + 2450)" },
+    { "path": "ui.captures.total", "equals": 3825, "description": "Total shows 10% off rounded down: 4250 - floor(425) = 3825" }
+  ]
+}

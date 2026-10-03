@@ -1,0 +1,17 @@
+{
+  "id": "order-confirmation-shows-email",
+  "title": "Order confirmation page displays the email address",
+  "description": "After placing an order, the confirmation page shows the receipt email.",
+  "steps": [
+    { "do": "goto", "path": "/" },
+    { "do": "click", "testId": "add-to-cart-2" },
+    { "do": "goto", "path": "/checkout" },
+    { "do": "fill", "testId": "checkout-email", "value": "confirm@example.com" },
+    { "do": "click", "testId": "place-order" },
+    { "do": "waitForUrl", "path": "/order/*" },
+    { "do": "waitFor", "testId": "order-email", "text": "confirm@example.com" }
+  ],
+  "expect": [
+    { "path": "db.orders.added[0].email", "equals": "confirm@example.com" }
+  ]
+}

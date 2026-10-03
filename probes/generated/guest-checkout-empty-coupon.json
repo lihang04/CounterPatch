@@ -1,0 +1,21 @@
+{
+  "id": "guest-checkout-empty-coupon",
+  "title": "Guest checkout works without entering any coupon",
+  "description": "Leaving the coupon field empty proceeds normally with no discount applied.",
+  "steps": [
+    { "do": "goto", "path": "/" },
+    { "do": "click", "testId": "add-to-cart-3" },
+    { "do": "waitFor", "testId": "cart-count", "text": "1" },
+    { "do": "goto", "path": "/checkout" },
+    { "do": "fill", "testId": "checkout-email", "value": "guest-no-coupon@example.com" },
+    { "do": "click", "testId": "place-order" },
+    { "do": "waitForUrl", "path": "/order/*" }
+  ],
+  "expect": [
+    { "path": "network.requests[\"POST /api/coupons\"]", "equals": null, "description": "No coupon API call made when field is empty" },
+    { "path": "network.last[\"POST /api/orders\"].status", "equals": 201 },
+    { "path": "db.orders.added.length", "equals": 1 },
+    { "path": "db.orders.added[0].total_cents", "equals": 2450 },
+    { "path": "db.orders.added[0].coupon_code", "equals": null }
+  ]
+}

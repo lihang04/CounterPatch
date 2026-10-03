@@ -1,0 +1,21 @@
+{
+  "id": "coupon-code-shown-on-confirmation",
+  "title": "Order confirmation displays the applied coupon code",
+  "description": "The order page shows which coupon was used for the discount.",
+  "candidateOnly": true,
+  "steps": [
+    { "do": "goto", "path": "/" },
+    { "do": "click", "testId": "add-to-cart-1" },
+    { "do": "goto", "path": "/checkout" },
+    { "do": "fill", "testId": "coupon-code", "value": "SAVE10" },
+    { "do": "click", "testId": "apply-coupon" },
+    { "do": "waitFor", "testId": "coupon-applied" },
+    { "do": "fill", "testId": "checkout-email", "value": "coupon-confirm@example.com" },
+    { "do": "click", "testId": "place-order" },
+    { "do": "waitForUrl", "path": "/order/*" },
+    { "do": "waitFor", "testId": "order-coupon", "text": "SAVE10" }
+  ],
+  "expect": [
+    { "path": "db.orders.added[0].coupon_code", "equals": "SAVE10" }
+  ]
+}

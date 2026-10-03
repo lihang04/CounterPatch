@@ -1,0 +1,13 @@
+{
+  "id": "coupon-api-endpoint",
+  "title": "Coupon API returns correct percent off for valid code",
+  "description": "Direct API test for the coupon lookup endpoint.",
+  "steps": [
+    { "do": "request", "method": "POST", "path": "/api/coupons", "body": { "code": "SAVE10" } }
+  ],
+  "expect": [
+    { "path": "network.last.status", "equals": 200 },
+    { "path": "network.last.body.code", "equals": "SAVE10" },
+    { "path": "network.last.body.percentOff", "equals": 10 }
+  ]
+}

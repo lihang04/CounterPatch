@@ -1,0 +1,16 @@
+{
+  "id": "multiple-quantities-total-correct",
+  "title": "Multiple quantities of a product show correct total",
+  "description": "Adding the same product twice doubles the line total.",
+  "steps": [
+    { "do": "goto", "path": "/" },
+    { "do": "click", "testId": "add-to-cart-1" },
+    { "do": "click", "testId": "add-to-cart-1" },
+    { "do": "waitFor", "testId": "cart-count", "text": "2" },
+    { "do": "goto", "path": "/checkout" },
+    { "do": "capture", "testId": "checkout-total", "as": "total", "parse": "money" }
+  ],
+  "expect": [
+    { "path": "ui.captures.total", "equals": 3600 }
+  ]
+}

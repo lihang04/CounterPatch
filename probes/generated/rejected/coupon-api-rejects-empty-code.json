@@ -1,0 +1,15 @@
+{
+  "id": "coupon-api-rejects-empty-code",
+  "title": "Coupon API rejects empty or missing code",
+  "description": "The coupon endpoint validates input and returns 400 for empty codes.",
+  "steps": [
+    { "do": "request", "method": "POST", "path": "/api/coupons", "body": { "code": "" } },
+    { "do": "request", "method": "POST", "path": "/api/coupons", "body": {} }
+  ],
+  "expect": [
+    { "path": "network.requests[0].status", "equals": 400 },
+    { "path": "network.requests[0].body.error", "equals": "Enter a coupon code." },
+    { "path": "network.requests[1].status", "equals": 400 },
+    { "path": "network.requests[1].body.error", "equals": "Enter a coupon code." }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "id": "guest-checkout-with-coupon",
+  "title": "Guest checkout applies a valid percentage coupon",
+  "description": "A guest can enter a coupon code, see the discounted total, and place an order with the reduced amount.",
+  "steps": [
+    { "do": "goto", "path": "/" },
+    { "do": "click", "testId": "add-to-cart-2" },
+    { "do": "waitFor", "testId": "cart-count", "text": "1" },
+    { "do": "goto", "path": "/checkout" },
+    { "do": "fill", "testId": "coupon-code", "value": "SAVE10" },
+    { "do": "click", "testId": "apply-coupon" },
+    { "do": "waitFor", "testId": "coupon-applied", "text": "SAVE10: 10% off" },
+    { "do": "capture", "testId": "checkout-total", "as": "displayedTotal", "parse": "money" },
+    { "do": "fill", "testId": "checkout-email", "value": "guest-coupon@example.com" },
+    { "do": "click", "testId": "place-order" },
+    { "do": "waitForUrl", "path": "/order/*" },
+    { "do": "capture", "testId": "order-total", "as": "orderTotal", "parse": "money" }
+  ],
+  "expect": [
+    { "path": "ui.url", "matches": "^/order/\\d+$" },
+    { "path": "network.last[\"POST /api/coupons\"].status", "equals": 200 },
+    { "path": "network.last[\"POST /api/coupons\"].body.percentOff", "equals": 10 },
+    { "path": "network.last[\"POST /api/orders\"].status", "equals": 201 },
+    { "path": "db.orders.added.length", "equals": 1 },
+    { "path": "db.orders.added[0].user_id", "equals": null },
+    { "path": "db.orders.added[0].email", "equals": "guest-coupon@example.com" },
+    { "path": "db.orders.added[0].total_cents", "equals": 7200 },
+    { "path": "db.orders.added[0].coupon_code", "equals": "SAVE10" },
+    { "path": "ui.captures.displayedTotal", "equals": 7200, "description": "Checkout page shows discounted total before placing order" },
+    { "path": "ui.captures.orderTotal", "equals": 7200, "description": "Order confirmation shows discounted total" }
+  ]
+}

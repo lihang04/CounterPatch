@@ -1,0 +1,24 @@
+{
+  "id": "guest-checkout-works",
+  "title": "Guest checkout completes an order",
+  "description": "A visitor who never signs in can add a product, check out with an email address, and get an order.",
+  "steps": [
+    { "do": "goto", "path": "/" },
+    { "do": "click", "testId": "add-to-cart-2" },
+    { "do": "waitFor", "testId": "cart-count", "text": "1" },
+    { "do": "goto", "path": "/checkout" },
+    { "do": "fill", "testId": "checkout-email", "value": "guest@example.com" },
+    { "do": "click", "testId": "place-order" },
+    { "do": "waitForUrl", "path": "/order/*" },
+    { "do": "capture", "testId": "order-total", "as": "orderTotal", "parse": "money" }
+  ],
+  "expect": [
+    { "path": "ui.url", "matches": "^/order/\\d+$" },
+    { "path": "network.last[\"POST /api/orders\"].status", "equals": 201 },
+    { "path": "db.orders.added.length", "equals": 1 },
+    { "path": "db.orders.added[0].user_id", "equals": null, "description": "The order belongs to no account" },
+    { "path": "db.orders.added[0].email", "equals": "guest@example.com" },
+    { "path": "db.orders.added[0].total_cents", "equals": 8000 },
+    { "path": "ui.captures.orderTotal", "equalsPath": "db.orders.added[0].total_cents", "description": "Displayed total equals stored total" }
+  ]
+}

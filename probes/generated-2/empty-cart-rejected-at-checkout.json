@@ -1,0 +1,15 @@
+{
+  "id": "empty-cart-rejected-at-checkout",
+  "title": "Empty cart cannot place an order",
+  "description": "Going to checkout with an empty cart shows an error when trying to place an order.",
+  "steps": [
+    { "do": "goto", "path": "/checkout" },
+    { "do": "fill", "testId": "checkout-email", "value": "empty@example.com" },
+    { "do": "click", "testId": "place-order" },
+    { "do": "waitFor", "testId": "checkout-email" }
+  ],
+  "expect": [
+    { "path": "network.last[\"POST /api/orders\"].status", "equals": 400 },
+    { "path": "db.orders.added.length", "equals": 0 }
+  ]
+}

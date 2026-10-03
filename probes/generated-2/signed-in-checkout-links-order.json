@@ -1,0 +1,23 @@
+{
+  "id": "signed-in-checkout-links-order",
+  "title": "Signed-in user checkout links order to account",
+  "description": "A logged-in user places an order and the order records their user_id.",
+  "steps": [
+    { "do": "goto", "path": "/login" },
+    { "do": "fill", "testId": "login-email", "value": "alice@example.com" },
+    { "do": "fill", "testId": "login-password", "value": "alice-password" },
+    { "do": "click", "testId": "login-submit" },
+    { "do": "waitForUrl", "path": "/" },
+    { "do": "click", "testId": "add-to-cart-1" },
+    { "do": "waitFor", "testId": "cart-count", "text": "1" },
+    { "do": "goto", "path": "/checkout" },
+    { "do": "click", "testId": "place-order" },
+    { "do": "waitForUrl", "path": "/order/*" }
+  ],
+  "expect": [
+    { "path": "db.orders.added.length", "equals": 1 },
+    { "path": "db.orders.added[0].user_id", "equals": 1 },
+    { "path": "db.orders.added[0].email", "equals": "alice@example.com" },
+    { "path": "db.orders.added[0].total_cents", "equals": 1800 }
+  ]
+}

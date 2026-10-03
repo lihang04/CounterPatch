@@ -1,0 +1,17 @@
+{
+  "id": "cart-persists-across-navigation",
+  "title": "Cart contents persist when navigating between pages",
+  "description": "Adding to cart then going to checkout shows the same items.",
+  "steps": [
+    { "do": "goto", "path": "/" },
+    { "do": "click", "testId": "add-to-cart-3" },
+    { "do": "waitFor", "testId": "cart-count", "text": "1" },
+    { "do": "goto", "path": "/cart" },
+    { "do": "waitFor", "testId": "cart-count", "text": "1" },
+    { "do": "goto", "path": "/checkout" },
+    { "do": "capture", "testId": "checkout-total", "as": "total", "parse": "money" }
+  ],
+  "expect": [
+    { "path": "ui.captures.total", "equals": 2450 }
+  ]
+}

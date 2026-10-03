@@ -1,0 +1,26 @@
+{
+  "id": "guest-checkout-invalid-coupon",
+  "title": "Guest checkout rejects an invalid coupon code",
+  "description": "Entering a non-existent coupon shows an error and does not apply a discount.",
+  "steps": [
+    { "do": "goto", "path": "/" },
+    { "do": "click", "testId": "add-to-cart-1" },
+    { "do": "waitFor", "testId": "cart-count", "text": "1" },
+    { "do": "goto", "path": "/checkout" },
+    { "do": "fill", "testId": "coupon-code", "value": "INVALID" },
+    { "do": "click", "testId": "apply-coupon" },
+    { "do": "waitFor", "testId": "coupon-error", "text": "not valid" },
+    { "do": "capture", "testId": "checkout-total", "as": "displayedTotal", "parse": "money" },
+    { "do": "fill", "testId": "checkout-email", "value": "guest-invalid@example.com" },
+    { "do": "click", "testId": "place-order" },
+    { "do": "waitForUrl", "path": "/order/*" }
+  ],
+  "expect": [
+    { "path": "network.last[\"POST /api/coupons\"].status", "equals": 404 },
+    { "path": "network.last[\"POST /api/orders\"].status", "equals": 201 },
+    { "path": "db.orders.added.length", "equals": 1 },
+    { "path": "db.orders.added[0].total_cents", "equals": 1800 },
+    { "path": "db.orders.added[0].coupon_code", "equals": null },
+    { "path": "ui.captures.displayedTotal", "equals": 1800, "description": "Total remains undiscounted after invalid coupon attempt" }
+  ]
+}

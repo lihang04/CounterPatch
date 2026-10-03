@@ -1,0 +1,26 @@
+{
+  "id": "multiple-items-with-coupon",
+  "title": "Coupon applies to cart with multiple quantities and products",
+  "description": "Discount is calculated on the full cart subtotal including quantities.",
+  "steps": [
+    { "do": "goto", "path": "/" },
+    { "do": "click", "testId": "add-to-cart-1" },
+    { "do": "click", "testId": "add-to-cart-1" },
+    { "do": "click", "testId": "add-to-cart-2" },
+    { "do": "waitFor", "testId": "cart-count", "text": "3" },
+    { "do": "goto", "path": "/checkout" },
+    { "do": "capture", "testId": "checkout-subtotal", "as": "subtotal", "parse": "money" },
+    { "do": "fill", "testId": "coupon-code", "value": "SAVE10" },
+    { "do": "click", "testId": "apply-coupon" },
+    { "do": "waitFor", "testId": "coupon-applied" },
+    { "do": "capture", "testId": "checkout-total", "as": "total", "parse": "money" },
+    { "do": "fill", "testId": "checkout-email", "value": "multi-coupon@example.com" },
+    { "do": "click", "testId": "place-order" },
+    { "do": "waitForUrl", "path": "/order/*" }
+  ],
+  "expect": [
+    { "path": "ui.captures.subtotal", "equals": 11600, "description": "2×1800 + 8000 = 11600" },
+    { "path": "ui.captures.total", "equals": 10440, "description": "11600 - floor(1160) = 10440" },
+    { "path": "db.orders.added[0].total_cents", "equals": 10440 }
+  ]
+}

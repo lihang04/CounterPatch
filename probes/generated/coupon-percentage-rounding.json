@@ -1,0 +1,17 @@
+{
+  "id": "coupon-percentage-rounding",
+  "title": "Coupon discount rounds down to whole cents",
+  "description": "The discount calculation floors the result so totals are never under-charged by a fraction of a cent.",
+  "steps": [
+    { "do": "goto", "path": "/" },
+    { "do": "click", "testId": "add-to-cart-1" },
+    { "do": "goto", "path": "/checkout" },
+    { "do": "fill", "testId": "coupon-code", "value": "SAVE10" },
+    { "do": "click", "testId": "apply-coupon" },
+    { "do": "waitFor", "testId": "coupon-applied" },
+    { "do": "capture", "testId": "checkout-total", "as": "total", "parse": "money" }
+  ],
+  "expect": [
+    { "path": "ui.captures.total", "equals": 1620, "description": "1800 - floor(180) = 1620 (exact)" }
+  ]
+}
