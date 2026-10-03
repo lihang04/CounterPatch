@@ -18,14 +18,16 @@ export class ExecError extends Error {
 export function exec(
   file: string,
   args: string[],
-  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+  options: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string } = {},
 ): Promise<ExecResult> {
   return new Promise((resolve, reject) => {
     const child = spawn(file, args, {
       cwd: options.cwd,
       env: options.env ?? process.env,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
+    // Closed straight away when there is no input, so nothing waits on stdin.
+    child.stdin.end(options.input);
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => (stdout += chunk));

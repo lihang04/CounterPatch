@@ -57,6 +57,30 @@ test("probes are rejected unless each expectation has exactly one comparison", (
   assert.throws(() => parseProbe({ ...base, steps: [{ do: "evaluate", script: "1" }], expect: [] }, "inline"), /invalid/);
 });
 
+test("invalid evidence paths and regexes are rejected when a probe is loaded", () => {
+  const base = { id: "p", title: "p", steps: [{ do: "goto", path: "/" }] };
+  for (const expectation of [
+    { path: "ui..url", equals: "/" },
+    { path: "db.orders[", equals: 0 },
+    { path: "ui.url", equalsPath: "db..orders" },
+    { path: "ui.url", equalsPath: "" },
+    { path: "ui.url", matches: "[" },
+  ]) {
+    assert.throws(
+      () => parseProbe({ ...base, expect: [expectation] }, "bad-probe.json"),
+      /Probe bad-probe\.json is invalid/,
+    );
+  }
+  assert.throws(
+    () => parseProbe({ ...base, expect: [{ path: "ui.url", matches: "[" }] }, "inline"),
+    /Invalid regular expression/,
+  );
+  assert.throws(
+    () => parseProbe({ ...base, expect: [{ path: "ui..url", equals: "/" }] }, "inline"),
+    /Invalid evidence path/,
+  );
+});
+
 test("evidence differences are reported per leaf", () => {
   const candidate = structuredClone(evidence);
   candidate.ui.url = "/login";

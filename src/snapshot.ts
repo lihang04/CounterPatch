@@ -29,6 +29,12 @@ export async function repoRoot(dir: string): Promise<string> {
   }
 }
 
+// Where CounterPatch keeps per-repository state. Inside the git directory, so
+// it is never part of the working tree, a snapshot, or a commit.
+export async function stateDir(root: string): Promise<string> {
+  return path.join(await git(root, ["rev-parse", "--absolute-git-dir"]), "counterpatch");
+}
+
 // Runs `fn` with a private index file so the user's real index is never touched.
 async function withScratchIndex<T>(root: string, fn: (env: NodeJS.ProcessEnv) => Promise<T>): Promise<T> {
   const gitDir = await git(root, ["rev-parse", "--absolute-git-dir"]);
@@ -43,7 +49,7 @@ async function withScratchIndex<T>(root: string, fn: (env: NodeJS.ProcessEnv) =>
 }
 
 // Captures the working tree exactly as it is on disk — tracked, modified and
-// untracked files, minus anything gitignored — and returns its tree id.
+// untracked files, minus ignored files that are not tracked — and returns its tree id.
 // Comparing against HEAD instead would miss uncommitted pre-task changes.
 export async function snapshotWorkingTree(root: string): Promise<string> {
   return withScratchIndex(root, async (env) => {
@@ -53,6 +59,17 @@ export async function snapshotWorkingTree(root: string): Promise<string> {
     );
     // Starting from HEAD lets `add` reuse existing blobs for unchanged files.
     if (hasHead) await git(root, ["read-tree", "HEAD"], env);
+    // Include newly staged files even when they match .gitignore. Transfer
+    // entries without index flags so assume-unchanged/skip-worktree cannot
+    // hide edits on disk. NUL records preserve arbitrary filenames.
+    const { stdout: entries } = await exec("git", ["ls-files", "--stage", "-z"], { cwd: root });
+    if (entries) {
+      await exec("git", ["update-index", "-z", "--index-info"], {
+        cwd: root,
+        env: { ...process.env, ...env },
+        input: entries,
+      });
+    }
     await git(root, ["add", "--all", "--", "."], env);
     return git(root, ["write-tree"], env);
   });

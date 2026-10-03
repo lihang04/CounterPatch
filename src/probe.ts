@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
+import { parsePath } from "./evidence.ts";
 
 // Probes are data, not code: a fixed vocabulary of browser steps plus
 // expectations over the collected evidence. That keeps generated probes
@@ -23,13 +24,31 @@ const StepSchema = z.discriminatedUnion("do", [
 
 const JsonValue: z.ZodType<unknown> = z.json();
 
+const EvidencePathSchema = z.string().min(1).refine((value) => {
+  try {
+    parsePath(value);
+    return true;
+  } catch {
+    return false;
+  }
+}, { message: "Invalid evidence path." });
+
+const RegexSchema = z.string().refine((value) => {
+  try {
+    new RegExp(value);
+    return true;
+  } catch {
+    return false;
+  }
+}, { message: "Invalid regular expression." });
+
 const ExpectationSchema = z
   .strictObject({
     // Path into the evidence, e.g. `db.orders.added[0].total_cents`.
-    path: z.string().min(1),
+    path: EvidencePathSchema,
     equals: JsonValue.optional(),
-    matches: z.string().optional(),
-    equalsPath: z.string().optional(),
+    matches: RegexSchema.optional(),
+    equalsPath: EvidencePathSchema.optional(),
     description: z.string().optional(),
   })
   .refine(

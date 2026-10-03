@@ -1,5 +1,4 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import fs from "node:fs/promises";
 import net from "node:net";
@@ -65,11 +64,6 @@ async function tail(file: string, lines = 25): Promise<string> {
   return plain.trimEnd().split("\n").slice(-lines).join("\n");
 }
 
-async function fileHash(file: string): Promise<string | null> {
-  const content = await fs.readFile(file).catch(() => null);
-  return content ? createHash("sha256").update(content).digest("hex") : null;
-}
-
 // Copy-on-write where the filesystem supports it (APFS, btrfs, xfs), plain copy otherwise.
 export async function cloneDir(source: string, dest: string): Promise<void> {
   const flags = process.platform === "darwin" ? ["-cR"] : ["-R", "--reflink=auto"];
@@ -105,7 +99,6 @@ export async function prepareEnv(options: {
   role: Role;
   repoRoot: string;
   tree: string;
-  sourceAppDir: string;
   home: string;
 }): Promise<PreparedEnv> {
   const { role, tree } = options;
@@ -114,7 +107,9 @@ export async function prepareEnv(options: {
   const readyMarker = path.join(envsDir, `${tree}.ready`);
   const logPath = path.join(envsDir, `${tree}.prepare.log`);
 
-  if ((await exists(readyMarker)) && (await exists(dir))) {
+  // Older cache entries may contain unverified checkout dependencies.
+  const prepareVersion = "2";
+  if ((await fs.readFile(readyMarker, "utf8").catch(() => null)) === prepareVersion && (await exists(dir))) {
     return { role, tree, dir, manifest: await loadManifest(dir), reused: true };
   }
 
@@ -128,23 +123,17 @@ export async function prepareEnv(options: {
   const fail = async (phase: "install" | "build", command: string, code: number | null) =>
     new EnvError(role, phase, `${role}: "${command}" exited with code ${code}.`, logPath, await tail(logPath));
 
-  const sourceModules = path.join(options.sourceAppDir, "node_modules");
-  const lockHash = await fileHash(path.join(dir, manifest.lockfile));
-  const sourceLockHash = await fileHash(path.join(options.sourceAppDir, manifest.lockfile));
-  if (lockHash !== null && lockHash === sourceLockHash && (await exists(sourceModules))) {
-    // Same lockfile as the developer's checkout: reuse its installed modules.
-    await cloneDir(sourceModules, path.join(dir, "node_modules"));
-  } else {
-    const code = await runShell(manifest.commands.install, dir, appEnv(), logPath);
-    if (code !== 0) throw await fail("install", manifest.commands.install, code);
-  }
+  // Matching lockfiles do not prove the checkout's node_modules is current.
+  // Install from the snapshot itself; only completed environments are reused.
+  const code = await runShell(manifest.commands.install, dir, appEnv(), logPath);
+  if (code !== 0) throw await fail("install", manifest.commands.install, code);
 
   if (manifest.commands.build) {
     const code = await runShell(manifest.commands.build, dir, appEnv(), logPath);
     if (code !== 0) throw await fail("build", manifest.commands.build, code);
   }
 
-  await fs.writeFile(readyMarker, new Date().toISOString());
+  await fs.writeFile(readyMarker, prepareVersion);
   return { role, tree, dir, manifest, reused: false };
 }
 

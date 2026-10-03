@@ -124,7 +124,6 @@ export async function verify(options: {
           role,
           repoRoot: root,
           tree: role === "control" ? controlAppTree : candidateAppTree,
-          sourceAppDir,
           home,
         }),
       ),

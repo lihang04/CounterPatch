@@ -102,3 +102,46 @@ test("trees can be materialized concurrently, as control and candidate are", asy
     assert.equal(await fs.readFile(path.join(b, "app", "edited.txt"), "utf8"), "agent edit\n");
   }
 });
+
+test("force-added ignored files are captured from disk, with and without HEAD", async (t) => {
+  for (const committed of [false, true]) {
+    await t.test(committed ? "committed repository" : "unborn repository", async (t) => {
+      const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "counterpatch-forced-")));
+      t.after(() => fs.rm(dir, { recursive: true, force: true }));
+      const git = async (...args: string[]) => (await exec("git", args, { cwd: dir })).stdout;
+      await git("init", "--quiet");
+      await fs.writeFile(path.join(dir, ".gitignore"), "ignored/\n");
+      await git("add", ".gitignore");
+      if (committed) await git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "initial");
+      await fs.mkdir(path.join(dir, "ignored"));
+      const names = ["ignored/forced.txt", "ignored/with\ttab\nand newline.txt", "ignored/deleted.txt"];
+      for (const name of names) await fs.writeFile(path.join(dir, name), "staged contents\n");
+      await git("add", "-f", "--", ...names);
+      for (const name of names.slice(0, 2)) await fs.writeFile(path.join(dir, name), "current disk contents\n");
+      await fs.rm(path.join(dir, names[2]!));
+      await fs.writeFile(path.join(dir, "ignored", "untracked.txt"), "excluded\n");
+      const index = path.join(dir, ".git", "index");
+      const before = await fs.readFile(index);
+
+      const tree = await snapshotWorkingTree(dir);
+      assert.deepEqual(await fs.readFile(index), before, "the real index changed");
+      for (const name of names.slice(0, 2)) assert.equal(await git("show", `${tree}:${name}`), "current disk contents\n");
+      const files = (await git("ls-tree", "-r", "-z", "--name-only", tree)).split("\0").filter(Boolean);
+      assert.deepEqual(files, [".gitignore", ...names.slice(0, 2)]);
+    });
+  }
+});
+
+test("snapshotting does not inherit assume-unchanged flags from the real index", async () => {
+  await git("update-index", "--assume-unchanged", "app/edited.txt");
+  const index = path.join(repo, ".git", "index");
+  const before = await fs.readFile(index);
+  try {
+    await fs.writeFile(path.join(repo, "app", "edited.txt"), "changed despite the index flag\n");
+    const tree = await snapshotWorkingTree(repo);
+    assert.equal(await git("show", `${tree}:app/edited.txt`), "changed despite the index flag\n");
+    assert.deepEqual(await fs.readFile(index), before);
+  } finally {
+    await git("update-index", "--no-assume-unchanged", "app/edited.txt");
+  }
+});
