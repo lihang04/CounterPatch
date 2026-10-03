@@ -5,18 +5,15 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { cloneDir, killAllServers } from "../src/env.ts";
+import { killAllServers } from "../src/env.ts";
 import { exec } from "../src/exec.ts";
 import { loadProbes } from "../src/probe.ts";
 import { exitCode, renderReport } from "../src/report.ts";
 import { recordBaseline } from "../src/snapshot.ts";
 import { verify, type ProbeResult, type Verdict } from "../src/verify.ts";
+import { copyDemoShop, fixtures, shopProbes } from "./support.ts";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const projectRoot = path.resolve(here, "..");
-const demoApp = path.join(projectRoot, "demo-app");
-const SKIP = new Set(["node_modules", ".next", "data", "next-env.d.ts", "tsconfig.tsbuildinfo"]);
+const buggyPatch = path.join(fixtures, "coupons-buggy.patch");
 
 async function main() {
   const sandbox = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "counterpatch-e2e-")));
@@ -25,12 +22,7 @@ async function main() {
   const git = (...args: string[]) => exec("git", args, { cwd: repo });
 
   try {
-    assert.ok(
-      await fs.stat(path.join(demoApp, "node_modules")).catch(() => null),
-      'demo-app/node_modules is missing; run "npm install" in demo-app first.',
-    );
-    await fs.cp(demoApp, repo, { recursive: true, filter: (source) => !SKIP.has(path.basename(source)) });
-    await cloneDir(path.join(demoApp, "node_modules"), path.join(repo, "node_modules"));
+    await copyDemoShop(repo);
 
     // HEAD is committed with a broken checkout form; the fix exists only as an
     // uncommitted edit. A baseline taken from HEAD would make the guest
@@ -45,9 +37,9 @@ async function main() {
     await fs.writeFile(form, working);
 
     await recordBaseline(repo);
-    await git("apply", path.join(here, "fixtures", "coupons-buggy.patch"));
+    await git("apply", buggyPatch);
 
-    const probes = await loadProbes([path.join(projectRoot, "probes", "shop"), path.join(here, "fixtures", "probes")]);
+    const probes = await loadProbes([shopProbes, path.join(fixtures, "probes")]);
     const started = Date.now();
     const report = await verify({ repo, app: ".", probes, home, progress: (message) => console.error(message) });
     console.log(renderReport(report, false));
@@ -116,7 +108,7 @@ async function main() {
     if (again.outcome === "completed") assert.deepEqual(again.reused, { control: true, candidate: true });
 
     // Reverting the change makes the working tree identical to the baseline.
-    await git("apply", "--reverse", path.join(here, "fixtures", "coupons-buggy.patch"));
+    await git("apply", "--reverse", buggyPatch);
     assert.equal((await verify({ repo, app: ".", probes, home })).outcome, "unchanged");
 
     console.log("e2e: PASS");

@@ -12,7 +12,7 @@
     "counterpatch": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/unit/*.test.ts",
-    "e2e": "tsx test/e2e.ts"
+    "e2e": "tsx test/e2e.ts && tsx test/hooks.e2e.ts"
   },
   "engines": {
     "node": ">=22"
