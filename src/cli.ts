@@ -2,9 +2,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { killAllServers } from "./env.ts";
+import { exec } from "./exec.ts";
 import { onPrompt, onStop, readTask, readTaskPrompts } from "./hooks.ts";
 import { loadProbes } from "./probe.ts";
-import { exitCode, renderReport } from "./report.ts";
+import { HTML_REPORT_FILE, exitCode, renderReport } from "./report.ts";
 import { changedFiles, readBaseline, recordBaseline, repoRoot, snapshotWorkingTree } from "./snapshot.ts";
 import { defaultHome, verify } from "./verify.ts";
 
@@ -28,6 +29,7 @@ Options:
                     counterpatch.manifest.json (default: the repository root).
   --probes <path>   Probe file or directory of *.json probes. Repeatable.
   --json            verify: print the full report as JSON instead of text.
+  --open            verify: open the report page in the browser when done.
 
 Exit codes for verify: 0 no counterexample discovered, 1 counterexample found,
 2 an environment failed to install, build or start.
@@ -95,6 +97,7 @@ async function main(): Promise<number> {
       app: { type: "string", default: "." },
       probes: { type: "string", multiple: true, default: [] },
       json: { type: "boolean", default: false },
+      open: { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
     },
   });
@@ -145,6 +148,12 @@ async function main(): Promise<number> {
       process.stdout.write(
         values.json ? `${JSON.stringify(report, null, 2)}\n` : renderReport(report, process.stdout.isTTY === true),
       );
+      if (values.open && report.outcome === "completed") {
+        const opener = process.platform === "darwin" ? "open" : "xdg-open";
+        await exec(opener, [path.join(report.runDir, HTML_REPORT_FILE)]).catch((error: Error) =>
+          process.stderr.write(`Could not open the report page: ${error.message}\n`),
+        );
+      }
       return exitCode(report);
     }
     case "clean": {

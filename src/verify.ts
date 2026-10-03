@@ -5,6 +5,7 @@ import path from "node:path";
 import { chromium } from "playwright";
 import { EnvError, prepareEnv, startEnv, type RunningEnv } from "./env.ts";
 import { diffEvidence, type Evidence, type EvidenceDifference } from "./evidence.ts";
+import { writeHtmlReport } from "./html-report.ts";
 import type { Probe } from "./probe.ts";
 import { runProbe, type ProbeRun } from "./runner.ts";
 import {
@@ -167,6 +168,7 @@ export async function verify(options: {
       reused: { control: controlPrepared.reused, candidate: candidatePrepared.reused },
     };
     await fs.writeFile(path.join(runDir, "report.json"), JSON.stringify(report, null, 2));
+    await writeHtmlReport(report);
     return report;
   } catch (error) {
     if (error instanceof EnvError) {

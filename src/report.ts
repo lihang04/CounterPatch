@@ -1,7 +1,11 @@
+import path from "node:path";
 import type { ProbeRun } from "./runner.ts";
 import type { ProbeResult, Report, Verdict } from "./verify.ts";
 
 const MAX_DIFFERENCES = 8;
+
+// The run's report page, written next to report.json.
+export const HTML_REPORT_FILE = "report.html";
 
 type Paint = (text: string) => string;
 
@@ -24,7 +28,7 @@ function count(results: ProbeResult[], verdict: Verdict): number {
 }
 
 // Why a run failed, one reason per line.
-function failureReasons(run: ProbeRun): string[] {
+export function failureReasons(run: ProbeRun): string[] {
   const reasons: string[] = [];
   if (run.stepFailure) {
     const { index, step, message } = run.stepFailure;
@@ -164,6 +168,7 @@ export function renderReport(report: Report, color: boolean): string {
     lines.push("");
   }
 
+  lines.push(`Report page: ${path.join(report.runDir, HTML_REPORT_FILE)}`);
   lines.push(c.dim(`Evidence, screenshots and server logs: ${report.runDir}`), "");
   return lines.join("\n");
 }

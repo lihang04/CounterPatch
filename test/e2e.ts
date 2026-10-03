@@ -102,6 +102,12 @@ async function main() {
 
     assert.equal(exitCode(report), 1);
 
+    // The run leaves a self-contained report page with the screenshots embedded.
+    const page = await fs.readFile(path.join(report.runDir, "report.html"), "utf8");
+    assert.match(page, /4 probes passed before the change and fail after it\./);
+    assert.match(page, /4 probes now end on <code>\/login<\/code>/);
+    assert.ok((page.match(/src="data:image\/png;base64,/g) ?? []).length >= 9, "screenshots are not embedded");
+
     // Same baseline, same candidate: both environments come from the cache.
     const again = await verify({ repo, app: ".", probes: probes.slice(0, 1), home });
     assert.equal(again.outcome, "completed");
