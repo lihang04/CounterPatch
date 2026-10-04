@@ -5,12 +5,14 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { killAllServers } from "../src/env.ts";
-import { exec } from "../src/exec.ts";
-import { loadProbes } from "../src/probe.ts";
+import { exec, ExecError } from "../src/exec.ts";
+import { loadProbes, parseProbe } from "../src/probe.ts";
+import { parseContract } from "../src/contract.ts";
 import { exitCode, renderReport } from "../src/report.ts";
-import { recordBaseline } from "../src/snapshot.ts";
-import { verify, type ProbeResult, type Verdict } from "../src/verify.ts";
+import { readBaseline, recordBaseline } from "../src/snapshot.ts";
+import { verify, type ProbeResult, type RunReport, type Verdict } from "../src/verify.ts";
 import { copyDemoShop, fixtures, shopProbes } from "./support.ts";
 
 const buggyPatch = path.join(fixtures, "coupons-buggy.patch");
@@ -102,6 +104,36 @@ async function main() {
 
     assert.equal(exitCode(report), 1);
 
+    // The exact same candidate has different obligations under explicit tasks.
+    const contract = parseContract({ schemaVersion: 1, title: "Require login at checkout", requirements: [
+      { id: "checkout-access", kind: "change", description: "Guests visiting checkout are redirected to login" },
+    ], exclusions: ["Coupon pricing"] });
+    const loginProbe = parseProbe({ id: "login-required", title: "Checkout redirects guests to login", requirementId: "checkout-access",
+      steps: [{ do: "goto", path: "/checkout" }], expect: [{ path: "ui.url", equals: "/login" }] }, "test");
+    const intended = await verify({ repo, app: ".", probes: [loginProbe], contract, home });
+    assert.equal(intended.outcome, "completed");
+    assert.equal(exitCode(intended), 0);
+    if (intended.outcome !== "completed") assert.fail("expected requested behavior to be fulfilled");
+    assert.equal(intended.assessment?.requirements[0]?.probes[0]?.decision, "fulfilled");
+    assert.equal(intended.results[0]?.control?.status, "fail");
+    assert.equal(intended.results[0]?.candidate?.status, "pass");
+    const intendedHtml = await fs.readFile(path.join(intended.runDir, "report.html"), "utf8");
+    assert.match(intendedHtml, /Task requirements met by the checked probes/);
+    assert.doesNotMatch(intendedHtml, /probe is wrong|Verification inconclusive/);
+    const preserve = parseContract({ ...contract, title: "Keep guest checkout", requirements: [
+      { id: "checkout-access", kind: "preserve", description: "Guests can still complete checkout" },
+    ] });
+    const preserved = await verify({ repo, app: ".", probes: [{ ...guest.probe, requirementId: "checkout-access" }], contract: preserve, home });
+    assert.equal(exitCode(preserved), 1);
+    if (preserved.outcome !== "completed") assert.fail("expected a preservation regression");
+    assert.equal(preserved.assessment?.requirements[0]?.probes[0]?.decision, "regression");
+    const uncovered = parseContract({ ...contract, requirements: [...contract.requirements,
+      { id: "signed-in-checkout", kind: "preserve", description: "Signed-in checkout keeps working" },
+    ] });
+    const missing = await verify({ repo, app: ".", probes: [loginProbe], contract: uncovered, home });
+    assert.equal(missing.outcome, "inconclusive");
+    assert.equal(exitCode(missing), 3);
+
     // The run leaves a self-contained report page with the screenshots embedded.
     const page = await fs.readFile(path.join(report.runDir, "report.html"), "utf8");
     assert.match(page, /4 probes passed before the change and fail after it\./);
@@ -113,9 +145,64 @@ async function main() {
     assert.equal(again.outcome, "completed");
     if (again.outcome === "completed") assert.deepEqual(again.reused, { control: true, candidate: true });
 
+    // A run with only a broken probe has no usable result, but retains its artifacts.
+    const inconclusive = await verify({ repo, app: ".", probes: [result("broken-probe").probe], home });
+    assert.equal(inconclusive.outcome, "inconclusive");
+    assert.equal(exitCode(inconclusive), 3);
+    if (inconclusive.outcome === "inconclusive") {
+      assert.deepEqual(inconclusive.results.map((r) => r.verdict), ["discarded"]);
+      const saved = JSON.parse(await fs.readFile(path.join(inconclusive.runDir, "report.json"), "utf8"));
+      assert.equal(saved.outcome, "inconclusive");
+      assert.equal(saved.results[0].control.status, "fail");
+      const html = await fs.readFile(path.join(inconclusive.runDir, "report.html"), "utf8");
+      assert.match(html, /<h1>Verification inconclusive\.<\/h1>/);
+      assert.doesNotMatch(html, /No counterexample discovered/);
+    }
+
+    // Direct API callers can supply no probes; that must not report success either.
+    const empty = await verify({ repo, app: ".", probes: [], home });
+    assert.equal(empty.outcome, "inconclusive");
+    assert.equal(exitCode(empty), 3);
+
     // Reverting the change makes the working tree identical to the baseline.
     await git("apply", "--reverse", buggyPatch);
     assert.equal((await verify({ repo, app: ".", probes, home })).outcome, "unchanged");
+    const unimplemented = await verify({ repo, app: ".", probes: [loginProbe], contract, home });
+    assert.equal(exitCode(unimplemented), 1, "unchanged code must not fulfill an unimplemented request");
+
+    // Current sources and baseline are fixed. Replay must still reproduce the
+    // retained guest regression, using the original contract and probe inputs.
+    const movedBaseline = await recordBaseline(repo);
+    const indexBefore = (await git("write-tree")).stdout;
+    assert.ok(preserved.bundle);
+    let replayed: RunReport;
+    try {
+      await exec(process.execPath, ["--import", "tsx", fileURLToPath(new URL("../src/cli.ts", import.meta.url)),
+        "replay", "--bundle", preserved.bundle.path, "--json"], { env: { ...process.env, COUNTERPATCH_HOME: home } });
+      assert.fail("replaying the retained regression must exit 1");
+    } catch (error) {
+      assert.ok(error instanceof ExecError);
+      assert.equal(error.code, 1);
+      replayed = JSON.parse(error.stdout);
+    }
+    assert.equal(replayed.outcome, "completed");
+    assert.deepEqual(replayed.baseline, preserved.baseline);
+    assert.deepEqual(replayed.assessment?.contract, preserve);
+    assert.equal(replayed.assessment?.requirements[0]?.probes[0]?.decision, "regression");
+    assert.equal(replayed.results[0]?.control?.evidence.ui.url, "/order/1");
+    assert.equal(replayed.results[0]?.candidate?.evidence.ui.url, "/login");
+    assert.deepEqual(replayed.reused, { control: false, candidate: false });
+    assert.equal(replayed.replay?.sourceBundle.sha256, preserved.bundle.sha256);
+    assert.notEqual(replayed.runDir, preserved.runDir);
+    assert.deepEqual(await readBaseline(repo), movedBaseline);
+    assert.equal((await git("write-tree")).stdout, indexBefore);
+    assert.equal(await fs.readFile(form, "utf8"), working);
+    const replayHtml = await fs.readFile(path.join(replayed.runDir, "report.html"), "utf8");
+    assert.match(replayHtml, /Replay of/);
+    assert.match(replayHtml, /Task requirements not met/);
+    const replayBundle = JSON.parse(await fs.readFile(replayed.bundle!.path, "utf8"));
+    assert.equal(replayBundle.execution.preparation, "fresh");
+    assert.equal(replayBundle.replayOf.sha256, preserved.bundle.sha256);
 
     console.log("e2e: PASS");
   } finally {

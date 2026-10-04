@@ -16,6 +16,11 @@ const ManifestSchema = z.strictObject({
     start: z.string().min(1),
     resetDatabase: z.string().min(1),
   }),
+  timeouts: z.strictObject({
+    installMs: z.number().int().positive().max(2_147_483_647).default(300_000),
+    buildMs: z.number().int().positive().max(2_147_483_647).default(300_000),
+    resetDatabaseMs: z.number().int().positive().max(2_147_483_647).default(60_000),
+  }).prefault({}),
   lockfile: z.string().default("package-lock.json"),
   env: z
     .strictObject({
@@ -59,6 +64,12 @@ const ManifestSchema = z.strictObject({
 
 export type Manifest = z.infer<typeof ManifestSchema>;
 
+export function parseManifest(json: unknown, source: string): Manifest {
+  const parsed = ManifestSchema.safeParse(json);
+  if (!parsed.success) throw new Error(`${source} is invalid:\n${z.prettifyError(parsed.error)}`);
+  return parsed.data;
+}
+
 export async function loadManifest(appDir: string): Promise<Manifest> {
   const file = path.join(appDir, MANIFEST_FILE);
   let raw: string;
@@ -73,9 +84,5 @@ export async function loadManifest(appDir: string): Promise<Manifest> {
   } catch (error) {
     throw new Error(`${file} is not valid JSON: ${(error as Error).message}`);
   }
-  const parsed = ManifestSchema.safeParse(json);
-  if (!parsed.success) {
-    throw new Error(`${file} is invalid:\n${z.prettifyError(parsed.error)}`);
-  }
-  return parsed.data;
+  return parseManifest(json, file);
 }

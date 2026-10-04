@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { groupBySymptom, renderHtmlReport } from "../../src/html-report.ts";
 import { parseProbe } from "../../src/probe.ts";
+import { exitCode, renderReport } from "../../src/report.ts";
 import type { ProbeRun } from "../../src/runner.ts";
 import type { ProbeResult, Report, Verdict } from "../../src/verify.ts";
 
@@ -80,7 +81,8 @@ test("the page states what was found, groups it, and embeds the screenshots", ()
   assert.match(html, /src="data:image\/png;base64,QUJD"/);
   assert.match(html, /No screenshot was captured\./);
   assert.match(html, /<summary>Checked <span class="count">1 probe passed<\/span>/);
-  assert.match(html, /<summary>Discarded <span class="count">1 probe failed/);
+  assert.match(html, /<summary>Unverified preservation <span class="count">1 probe failed/);
+  assert.doesNotMatch(html, /probe is wrong/);
 });
 
 test("a clean run says no counterexample was discovered, never that the change is safe", () => {
@@ -101,4 +103,51 @@ test("content from the app and from probes is escaped", () => {
   assert.doesNotMatch(html, /<img src=x/);
   assert.match(html, /&lt;script&gt;alert\(3\)&lt;\/script&gt;/);
   assert.match(html, /&lt;\/pre&gt;&lt;img src=x onerror=alert\(2\)&gt;/);
+});
+
+test("an inconclusive run shows a warning and the discarded probes instead of success", () => {
+  const inconclusive: Report = {
+    ...report([result("wrong", "discarded", "/", "/")]),
+    outcome: "inconclusive",
+  };
+  assert.equal(exitCode(inconclusive), 3);
+  const text = renderReport(inconclusive, false);
+  assert.match(text, /Verification inconclusive/);
+  assert.match(text, /Repair or add probes/);
+  assert.match(text, /Valid baseline probes: +0/);
+  assert.match(text, /Title of wrong/);
+  assert.match(text, /Report page: .*report\.html/);
+  assert.doesNotMatch(text, /No counterexample discovered/);
+
+  const html = renderHtmlReport(inconclusive, new Map());
+  assert.match(html, /<section class="verdict tone-warn">/);
+  assert.match(html, /<h1>Verification inconclusive\.<\/h1>/);
+  assert.match(html, /<details open>\s*<summary>Unverified preservation/);
+  assert.match(html, /Repair or add probes/);
+  assert.doesNotMatch(html, /No counterexample discovered/);
+});
+
+test("discarded probes do not mask usable results or change candidate-only exit codes", () => {
+  for (const [verdict, code] of [
+    ["held", 0], ["diverged", 1], ["candidate-only-passed", 0], ["candidate-only-failed", 1],
+  ] as const) {
+    const before = verdict.startsWith("candidate-only") ? null : "/";
+    const mixed = report([result("wrong", "discarded", "/", "/"), result("usable", verdict, before, "/")]);
+    assert.equal(exitCode(mixed), code, verdict);
+    assert.doesNotMatch(renderReport(mixed, false), /Verification inconclusive/);
+    assert.doesNotMatch(renderHtmlReport(mixed, new Map()), /Verification inconclusive/);
+  }
+});
+
+test("replay reports link their source and explain execution differences with escaped paths", () => {
+  const replayed = { ...report([result("ok", "held", "/cart", "/cart")]), replay: {
+    sourceBundle: { path: '/tmp/<script>source</script>/bundle.json', sha256: "a".repeat(64) },
+    executionDrift: [{ field: "nodeVersion", recorded: "v22.0.0", current: "v24.0.0" }],
+  } };
+  assert.match(renderReport(replayed, false), /Replay of:/);
+  assert.match(renderReport(replayed, false), /nodeVersion: v22.0.0 → v24.0.0/);
+  const html = renderHtmlReport(replayed, new Map());
+  assert.match(html, /Replay of \/tmp\/&lt;script&gt;source&lt;\/script&gt;/);
+  assert.match(html, /Execution settings changed: nodeVersion/);
+  assert.doesNotMatch(html, /<script>source/);
 });

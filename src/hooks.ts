@@ -25,7 +25,7 @@ const TaskSchema = z.strictObject({
 const PromptSchema = z.strictObject({ at: z.string(), sessionId: z.string(), prompt: z.string() });
 
 // The unit of verification: everything a session changes from its first prompt
-// until a verification finds no counterexample. One task per repository.
+// until a conclusive verification finds no failures. One task per repository.
 export type Task = z.infer<typeof TaskSchema>;
 export type CapturedPrompt = z.infer<typeof PromptSchema>;
 
@@ -93,15 +93,26 @@ export async function readTask(root: string): Promise<Task | null> {
 }
 
 // The user's own words for the open task, in order: the input for intent reconstruction.
-export async function readTaskPrompts(root: string): Promise<CapturedPrompt[]> {
-  const task = await readTask(root);
-  if (!task) return [];
+async function promptsForTask(root: string, task: Task): Promise<CapturedPrompt[]> {
   const raw = await fs.readFile(await promptsFile(root), "utf8").catch(() => "");
   return raw
     .split("\n")
     .filter((line) => line !== "")
     .map((line) => PromptSchema.parse(JSON.parse(line)))
     .filter((entry) => entry.sessionId === task.sessionId && entry.at >= task.startedAt);
+}
+
+// Capture task identity and prompts together; a concurrent hook must not pair
+// one task's identity with another task's prompt history.
+export async function readTaskContext(root: string): Promise<{ task: Task | null; prompts: CapturedPrompt[] }> {
+  return withTaskLock(root, async () => {
+    const task = await readTask(root);
+    return { task, prompts: task ? await promptsForTask(root, task) : [] };
+  });
+}
+
+export async function readTaskPrompts(root: string): Promise<CapturedPrompt[]> {
+  return (await readTaskContext(root)).prompts;
 }
 
 // UserPromptSubmit: log the prompt and, on the first prompt of a task, record
@@ -140,7 +151,7 @@ export async function onStop(
   if (report.outcome === "unchanged") return { message: null, report };
 
   // A clean result ends the task, so the next prompt is judged against the
-  // tree as it is now. Anything else keeps the original "before".
+  // tree as it is now. Failures and inconclusive runs keep the original "before".
   if (exitCode(report) === 0) {
     await withTaskLock(root, async () => {
       const current = await readTask(root);

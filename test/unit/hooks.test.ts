@@ -113,6 +113,31 @@ test("a clean result closes the task, so the next prompt starts from the current
   assert.deepEqual((await readTaskPrompts(repo)).map((entry) => entry.prompt), ["Now add free shipping."]);
 });
 
+test("an inconclusive run preserves the task and its baseline for follow-up prompts", async () => {
+  const task = await readTask(repo);
+  const baseline = await readBaseline(repo);
+  const prompts = await readTaskPrompts(repo);
+  assert.ok(task);
+  const completed = await reportWith("held");
+  assert.equal(completed.outcome, "completed");
+  if (completed.outcome !== "completed") return;
+  const report: Report = {
+    ...completed,
+    outcome: "inconclusive",
+    results: [{ probe, verdict: "discarded", control: run("fail", "/"), candidate: run("fail", "/"), differences: [] }],
+  };
+  const result = await onStop(repo, { session_id: task.sessionId }, async () => report);
+  assert.match(result.message ?? "", /Verification inconclusive/);
+  assert.doesNotMatch(result.message ?? "", /No counterexample discovered/);
+  assert.deepEqual(await readTask(repo), task);
+  assert.deepEqual(await readBaseline(repo), baseline);
+  assert.deepEqual(await readTaskPrompts(repo), prompts);
+
+  assert.deepEqual(await onPrompt(repo, { session_id: task.sessionId, prompt: "Repair the generated probes." }), { startedTask: false });
+  assert.equal((await readTask(repo))?.baseline, task.baseline);
+  assert.deepEqual(await readBaseline(repo), baseline);
+});
+
 test("a prompt from a different session starts a new task", async () => {
   await write("app.txt", "second session starts here\n");
   assert.deepEqual(await onPrompt(repo, { session_id: "s2", prompt: "Rename the shop." }), { startedTask: true });

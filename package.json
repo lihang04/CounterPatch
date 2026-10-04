@@ -12,7 +12,8 @@
     "counterpatch": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/unit/*.test.ts",
-    "e2e": "tsx test/e2e.ts && tsx test/hooks.e2e.ts"
+    "eval": "tsx test/evaluate.ts",
+    "e2e": "tsx test/e2e.ts && tsx test/hooks.e2e.ts && tsx test/generate.e2e.ts && tsx test/probe-limits.e2e.ts"
   },
   "engines": {
     "node": ">=22"

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "title": "Keep checkout available to guests",
+  "requirements": [
+    {
+      "id": "checkout-access",
+      "kind": "preserve",
+      "description": "Guests can still visit checkout without signing in."
+    }
+  ],
+  "exclusions": ["Coupon pricing", "Order completion; this example only checks guest access"]
+}

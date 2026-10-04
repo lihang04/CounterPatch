@@ -17,6 +17,8 @@ import type { Probe, Step } from "./probe.ts";
 const STEP_TIMEOUT_MS = 2_000;
 // How long after an interaction a request may still start and be waited for.
 const SETTLE_QUIET_MS = 100;
+export const PROBE_LIMITS = { stepTimeoutMs: STEP_TIMEOUT_MS, settleQuietMs: SETTLE_QUIET_MS } as const;
+export type ProbeLimits = { stepTimeoutMs: number; settleQuietMs: number };
 
 export type StepFailure = { index: number; step: Step; message: string };
 
@@ -92,7 +94,7 @@ function parseBody(text: string | null): unknown {
 
 // Records same-origin requests under the manifest's network prefixes, in the
 // order they were sent.
-function trackNetwork(page: Page, env: RunningEnv) {
+function trackNetwork(page: Page, env: RunningEnv, limits: ProbeLimits) {
   const calls: NetworkCall[] = [];
   const pending = new Set<Promise<void>>();
   const origin = new URL(env.baseUrl).origin;
@@ -129,9 +131,9 @@ function trackNetwork(page: Page, env: RunningEnv) {
 
   // Waits until no tracked request has been in flight for a short quiet period.
   const settle = async () => {
-    const deadline = Date.now() + STEP_TIMEOUT_MS;
+    const deadline = Date.now() + limits.stepTimeoutMs;
     while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, SETTLE_QUIET_MS));
+      await new Promise((resolve) => setTimeout(resolve, limits.settleQuietMs));
       if (pending.size === 0) return;
       await Promise.race([
         Promise.all(pending),
@@ -154,6 +156,7 @@ async function runStep(
   step: Step,
   captures: Record<string, string | number>,
   settle: () => Promise<void>,
+  limits: ProbeLimits,
 ): Promise<void> {
   const byTestId = (testId: string) =>
     page.locator(`[${env.manifest.ui.testIdAttribute}=${JSON.stringify(testId)}]`);
@@ -185,7 +188,7 @@ async function runStep(
       await locator.waitFor({ state: "visible" });
       if (step.text !== undefined) {
         const wanted = step.text;
-        const deadline = Date.now() + STEP_TIMEOUT_MS;
+        const deadline = Date.now() + limits.stepTimeoutMs;
         let seen = "";
         while (Date.now() < deadline) {
           seen = ((await locator.textContent()) ?? "").trim();
@@ -214,10 +217,10 @@ async function runStep(
 
 // Says what was missing and where the browser actually was, e.g. after an
 // unexpected redirect, instead of Playwright's bare "Timeout exceeded".
-function describeFailure(error: unknown, step: Step, page: Page): string {
+function describeFailure(error: unknown, step: Step, page: Page, limits: ProbeLimits): string {
   const message = error instanceof Error ? error.message : String(error);
   if (!(error instanceof Error) || error.name !== "TimeoutError") return message.split("\n")[0] ?? message;
-  const seconds = STEP_TIMEOUT_MS / 1000;
+  const seconds = limits.stepTimeoutMs / 1000;
   const where = page.url().startsWith("http") ? new URL(page.url()).pathname : page.url();
   if (step.do === "waitForUrl") return `the page never reached ${step.path}; it stayed on ${where}`;
   if (step.do === "goto") return `${step.path} did not finish loading and become interactive`;
@@ -231,16 +234,17 @@ export async function runProbe(
   env: RunningEnv,
   probe: Probe,
   artifactsDir: string,
+  limits: ProbeLimits = PROBE_LIMITS,
 ): Promise<ProbeRun> {
   const started = Date.now();
   await env.resetDatabase();
   const before = observeDatabase(env);
 
   const context = await browser.newContext({ baseURL: env.baseUrl });
-  context.setDefaultTimeout(STEP_TIMEOUT_MS);
-  context.setDefaultNavigationTimeout(STEP_TIMEOUT_MS * 3);
+  context.setDefaultTimeout(limits.stepTimeoutMs);
+  context.setDefaultNavigationTimeout(limits.stepTimeoutMs * 3);
   const page = await context.newPage();
-  const { calls, settle } = trackNetwork(page, env);
+  const { calls, settle } = trackNetwork(page, env, limits);
   const captures: Record<string, string | number> = {};
 
   let stepFailure: StepFailure | null = null;
@@ -249,9 +253,9 @@ export async function runProbe(
   try {
     for (const [index, step] of probe.steps.entries()) {
       try {
-        await runStep(page, env, step, captures, settle);
+        await runStep(page, env, step, captures, settle, limits);
       } catch (error) {
-        stepFailure = { index, step, message: describeFailure(error, step, page) };
+        stepFailure = { index, step, message: describeFailure(error, step, page, limits) };
         break;
       }
     }

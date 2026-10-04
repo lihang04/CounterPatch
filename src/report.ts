@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { ContractAssessment } from "./contract.ts";
 import type { ProbeRun } from "./runner.ts";
 import type { ProbeResult, Report, Verdict } from "./verify.ts";
 
@@ -6,6 +7,18 @@ const MAX_DIFFERENCES = 8;
 
 // The run's report page, written next to report.json.
 export const HTML_REPORT_FILE = "report.html";
+
+export const INCONCLUSIVE_MESSAGE = "No probes produced a usable result. A baseline failure may be an existing defect or an invalid probe. Repair or add probes and run verification again.";
+
+export function contractHeadline(assessment: ContractAssessment): { title: string; detail: string; tone: string } {
+  const counts = assessment.requirements.reduce((sum, r) => { sum[r.status]++; return sum; }, { met: 0, unmet: 0, inconclusive: 0 });
+  return {
+    title: assessment.status === "met" ? "Task requirements met by the checked probes."
+      : assessment.status === "unmet" ? "Task requirements not met." : "Task verification inconclusive.",
+    detail: `${counts.met} met; ${counts.unmet} unmet; ${counts.inconclusive} inconclusive. Results cover the linked probes, not every possible behavior.`,
+    tone: assessment.status === "met" ? "pass" : assessment.status === "unmet" ? "fail" : "warn",
+  };
+}
 
 type Paint = (text: string) => string;
 
@@ -60,6 +73,8 @@ function summarize(run: ProbeRun): string {
 export function exitCode(report: Report): number {
   if (report.outcome === "unchanged") return 0;
   if (report.outcome === "environment-failed") return 2;
+  if (report.assessment) return report.assessment.status === "met" ? 0 : report.assessment.status === "unmet" ? 1 : 3;
+  if (report.outcome === "inconclusive") return 3;
   const found = report.results.some((r) => r.verdict === "diverged" || r.verdict === "candidate-only-failed");
   return found ? 1 : 0;
 }
@@ -71,6 +86,15 @@ export function renderReport(report: Report, color: boolean): string {
   if (report.outcome === "unchanged") {
     lines.push("The working tree is identical to the baseline snapshot. Nothing to verify.", "");
     return lines.join("\n");
+  }
+
+  if (report.replay) {
+    lines.push(`Replay of: ${report.replay.sourceBundle.path}`);
+    if (report.replay.executionDrift.length) {
+      lines.push("Execution settings changed since the recorded run:");
+      for (const change of report.replay.executionDrift) lines.push(`  ${change.field}: ${change.recorded} → ${change.current}`);
+    }
+    lines.push("");
   }
 
   lines.push(`Baseline recorded ${report.baseline.createdAt}; ${report.changed.length} file(s) changed since:`);
@@ -86,10 +110,39 @@ export function renderReport(report: Report, color: boolean): string {
     lines.push(c.red(`${failure.role.toUpperCase()} FAILED DURING ${failure.phase.toUpperCase()}`), failure.message, meaning, "");
     if (failure.logTail) lines.push(c.dim(failure.logTail), "");
     lines.push(c.dim(`Full log: ${failure.logPath}`), "");
+    if (report.bundle) lines.push(`Verification bundle: ${report.bundle.path}`, "");
     return lines.join("\n");
   }
 
   const { results } = report;
+  if (report.assessment) {
+    const { assessment } = report;
+    const headline = contractHeadline(assessment);
+    lines.push(c.bold(assessment.contract.title), headline.title, headline.detail, "");
+    for (const entry of assessment.requirements) {
+      lines.push(c.bold(`${entry.status.toUpperCase()} [${entry.requirement.id}] ${entry.requirement.description}`));
+      lines.push(`  Requirement: ${entry.requirement.kind}`);
+      if (entry.probes.length === 0) lines.push("  No probes cover this requirement.");
+      for (const assessed of entry.probes) {
+        const result = results.find((r) => r.probe.id === assessed.probeId);
+        lines.push(`  ${assessed.decision} — ${assessed.probeId}: ${assessed.reason}`);
+        if (!result) continue;
+        for (const [side, run] of [["BEFORE", result.control], ["AFTER", result.candidate]] as const) {
+          if (!run) continue;
+          lines.push(`    ${side} ${run.status} — ${summarize(run)}`);
+          if (run.status === "fail") for (const reason of failureReasons(run)) lines.push(`      ${reason}`);
+        }
+        for (const difference of result.differences.slice(0, MAX_DIFFERENCES)) {
+          lines.push(`    ${difference.path}: ${show(difference.control)} → ${show(difference.candidate)}`);
+        }
+      }
+      lines.push("");
+    }
+    if (assessment.contract.exclusions.length) lines.push("Outside this task's scope:", ...assessment.contract.exclusions.map((e) => `  ${e}`), "");
+    if (report.bundle) lines.push(`Verification bundle: ${report.bundle.path}`);
+    lines.push(`Report page: ${path.join(report.runDir, HTML_REPORT_FILE)}`, `Evidence, screenshots and server logs: ${report.runDir}`, "");
+    return lines.join("\n");
+  }
   const diverged = count(results, "diverged");
   const discarded = count(results, "discarded");
   const unvalidated = count(results, "candidate-only-failed");
@@ -98,12 +151,14 @@ export function renderReport(report: Report, color: boolean): string {
   lines.push(
     `Probes run:              ${results.length}`,
     `Valid baseline probes:   ${differential - discarded}`,
-    `Discarded probes:        ${discarded}`,
+    `Unverified on baseline:  ${discarded}`,
     `Candidate-only probes:   ${results.length - differential}`,
     "",
   );
 
-  if (diverged + unvalidated === 0) {
+  if (report.outcome === "inconclusive") {
+    lines.push(c.yellow("Verification inconclusive."), INCONCLUSIVE_MESSAGE, "");
+  } else if (diverged + unvalidated === 0) {
     lines.push(c.green("No counterexample discovered."), "");
   } else {
     if (diverged > 0) lines.push(c.red(`${diverged} counterexample(s): passed before the change, fails after it.`));
@@ -160,7 +215,7 @@ export function renderReport(report: Report, color: boolean): string {
 
   const dropped = results.filter((r) => r.verdict === "discarded");
   if (dropped.length > 0) {
-    lines.push("Discarded (failed against the pre-task snapshot, so the probe is wrong):");
+    lines.push("Unverified preservation (failed on baseline; may be an existing defect or an invalid probe):");
     for (const result of dropped) {
       lines.push(`  ${c.dim("–")} ${result.probe.title}`);
       for (const reason of result.control ? failureReasons(result.control) : []) lines.push(c.dim(`      ${reason}`));
@@ -168,6 +223,7 @@ export function renderReport(report: Report, color: boolean): string {
     lines.push("");
   }
 
+  if (report.bundle) lines.push(`Verification bundle: ${report.bundle.path}`);
   lines.push(`Report page: ${path.join(report.runDir, HTML_REPORT_FILE)}`);
   lines.push(c.dim(`Evidence, screenshots and server logs: ${report.runDir}`), "");
   return lines.join("\n");

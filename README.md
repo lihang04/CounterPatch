@@ -8,22 +8,26 @@ It is scoped to one stack: **Next.js + TypeScript + SQLite + Playwright**.
 
 ## Status
 
-The execution foundation works end to end and involves no AI yet.
+The execution foundation works end to end. An optional model client generates probe JSON using OpenRouter or a compatible endpoint such as Nebius Token Factory; verification runs those probes locally.
 
 | Piece | State |
 | --- | --- |
 | Pre-task working-tree snapshot (including uncommitted and untracked files) | Done |
 | Control and candidate environments built from snapshots, started on separate ports and databases | Done |
 | Probes executed through a real browser, collecting UI, network and database evidence | Done |
-| Verdicts: held, diverged, discarded (broken probe), candidate-only | Done |
+| Differential observations plus requirement decisions when a task contract is supplied | Done |
+| Versioned task contracts, requirement-linked probes and explicit coverage gaps | Done |
+| Verification bundles with retained snapshot references and input hashes | Done |
+| Replay saved snapshots, contracts and probes in fresh environments | Done |
 | Demo shop with deterministic fixtures and a manifest | Done |
 | Session hooks: prompts captured and baseline recorded automatically, verification run when the agent stops | Done for Claude Code |
-| Intent contract, probe generation and evidence classification (NVIDIA Nemotron) | Not started |
+| Model-generated probes (OpenRouter / compatible chat-completions endpoint) | Implemented; validated locally, provider integration tested with a mock endpoint |
+| Model contract drafts from explicit requests or captured prompts, with supporting quotes and questions | Implemented; provider integration tested with a mock endpoint |
 | Next.js structure analysis (routes, proxy matchers, server actions, `fetch` relationships) | Not started |
 | Repair loop back into the coding agent | Not started |
 | Isolated execution on Nebius | Not started; environments run locally |
 
-Probes are hand-written JSON for now. A divergence is reported as an observation; deciding whether it violates the user's intent or is an intended change needs the intent contract, which is the next stage.
+Probes can be hand-written or generated JSON. Without a contract, verification reports differential observations. With `--contract`, linked requirements determine whether those observations fulfill the task, show a regression, or leave the result inconclusive.
 
 ## Quick start
 
@@ -60,10 +64,161 @@ npx counterpatch verify --app demo-app --probes probes/shop
 | --- | --- |
 | `snapshot` | Records the current working tree as the baseline. |
 | `status` | Shows the baseline and the files changed since. |
+| `check-model` | Tests the API key and model with a small fixed request; reports connectivity and JSON-output compliance separately. |
+| `draft-contract` | Drafts requirements from an explicit request or the open task's captured prompts, with supporting quotes and questions for review. |
+| `generate` | Sends the request and app context to a configured model, validates the returned probes, and saves a new generation directory. |
 | `verify` | Builds and runs control and candidate, runs the probes, prints the report. `--json` prints the full evidence; `--open` opens the report page in the browser. |
+| `replay` | Reruns the snapshots and inputs in `--bundle <bundle.json>` and creates a new report. |
 | `clean` | Deletes cached environments and past runs. |
 
-`verify` exits with 0 when no counterexample was discovered, 1 when one was, and 2 when an environment failed to install, build or start.
+`verify` exits with 0 when checks passed (or the app is unchanged without a contract), 1 when a counterexample, candidate-only failure or unmet task requirement was found, 2 when an environment failed to run or input was invalid, and 3 when verification is inconclusive. With a contract, uncovered requirements and unverified preservation prevent a successful result; any established requirement failure takes precedence and exits 1.
+
+## Verify the task's intent
+
+Write a task contract before making the change. Requirements have stable IDs and two kinds: `change` describes the desired new behavior; `preserve` describes behavior that must keep working. Exclusions document what this task does not check. They do not suppress failing probes.
+
+You can draft the contract with the configured model provider:
+
+```sh
+npm run counterpatch -- draft-contract --env-file .env --prompt "Add percentage coupons. Keep guest checkout available."
+
+# Or explicitly select the open task's captured prompt history:
+npm run counterpatch -- draft-contract --env-file .env --from-task
+```
+
+Drafting sends only the selected request text to the provider. It works in a Git repository without an app manifest or baseline. `--from-task` requires an open task recorded by the prompt hook and sends its prompts in order, including corrections. Every requirement must have exact supporting quotes linked to those prompts; invented quotes, missing links and duplicate IDs are rejected. Quoted support establishes traceability, so review whether the proposed requirement accurately reflects the request.
+
+The command creates a fresh directory under `.git/counterpatch/contract-drafts/` (or `--out <new-directory>`) containing `request.json`, `draft.json`, `metadata.json`, and `contract.json` when a contract could be drafted. Files are readable by their owner only. The request file preserves the selected text locally; metadata records hashes, model usage, task identity and revision. Task/session identity, repository source, and environment files are not sent as drafting context. Keys configure the request and are not saved in draft metadata.
+
+The CLI prints each requirement and its supporting quotes. Review and edit `contract.json`, resolve any questions in `draft.json`, then explicitly select that file with `generate --contract`. The command prints the next generation command when the draft has no unresolved questions. Drafts are never automatically activated by hooks or verification. Drafting exits 0 for a draft ready for review, 3 for unresolved questions or a task that changed while the model was drafting, and 2 for invalid input or provider/output failure. If a follow-up arrives during drafting, the saved draft is marked stale; rerun against the updated request. A request too ambiguous to produce requirements can return questions with no contract file.
+
+`--prompt` and `--from-task` are mutually exclusive. Inputs above 100 prompts or 50,000 serialized characters fail before the model call rather than dropping part of the task. Each invocation sends one model request without automatic retries and may use provider credits.
+
+```json
+{
+  "schemaVersion": 1,
+  "title": "Require login at checkout",
+  "requirements": [
+    { "id": "guest-access", "kind": "change", "description": "Guests visiting checkout are redirected to login." },
+    { "id": "signed-in-orders", "kind": "preserve", "description": "Signed-in customers can still place orders." }
+  ],
+  "exclusions": ["External payment processing"]
+}
+```
+
+Every probe used with a contract must include a `requirementId`. For `change`, assert the desired **after** behavior; it may legitimately fail on the baseline. For `preserve`, the probe must run on both snapshots. Missing or unknown IDs and candidate-only preservation probes are rejected. Multiple probes may cover one requirement; every requirement needs usable evidence. Review probe assertions against the requirement text: a valid ID establishes traceability, not semantic correctness.
+
+```sh
+# Use your own contract and linked probes; paths are relative to the shell.
+npm run counterpatch -- snapshot --repo /path/to/app
+# Make the requested code change, then:
+npm run counterpatch -- verify --repo /path/to/app --contract task.json --probes task-probes --open
+
+# Or generate linked probes using the configured model provider:
+npm run counterpatch -- generate --repo /path/to/app --contract task.json
+```
+
+Generation saves a copy of the contract alongside its probes and prints a verification command using that copy. Its metadata includes the contract hash and uncovered requirement IDs. Generation itself does not execute the probes or establish that the task is complete. `hook stop` also accepts `--contract`; hook paths resolve relative to the repository.
+
+| Requirement | Evidence | Decision |
+| --- | --- | --- |
+| change | Candidate passes its linked probes | Fulfilled by those probes |
+| change | Candidate fails a linked probe | Unfulfilled; inspect the probe and evidence |
+| preserve | Both snapshots pass | Preserved by those probes |
+| preserve | Baseline passes, candidate fails | Regression |
+| preserve | Baseline fails | Inconclusive: existing defect or invalid probe |
+| either | No linked probes, missing execution, or failed database observation | Inconclusive |
+
+An unchanged app still runs verification when a contract is supplied: unchanged code may leave the request unimplemented. Contracts do not automatically distinguish flaky runs or prove the assertions match the prose. Decisions describe the evidence from this run.
+
+In `report.json`, `assessment` contains the contract, requirement decisions, supporting probe IDs and observed pass/fail patterns. It determines the exit code when present. `results[].verdict` retains the older differential labels for compatibility; a baseline failure there does not override a fulfilled change requirement.
+
+The examples in [examples/require-login/](examples/require-login/) and [examples/preserve-guest/](examples/preserve-guest/) evaluate the same checkout redirect under opposite requirements. Run either against an app whose baseline permits guests and whose candidate redirects them to `/login`:
+
+```sh
+npm run counterpatch -- verify --repo /path/to/shop --contract examples/require-login/contract.json --probes examples/require-login/probes --open
+npm run counterpatch -- verify --repo /path/to/shop --contract examples/preserve-guest/contract.json --probes examples/preserve-guest/probes --open
+```
+
+The first fulfills the requested access change; the second reports a regression. These examples check guest access only. The end-to-end suite also checks actual guest order completion and missing coverage.
+
+Each executed run saves `bundle.json` before app commands start: the contract, probes, app manifests, baseline and candidate tree IDs, execution limits, Node/platform information, verifier source and dependency-lock hashes, and a SHA-256 digest of the bundle payload. Git refs under `refs/counterpatch/runs/` retain the snapshots after the baseline moves.
+
+```sh
+npm run counterpatch -- replay --bundle /path/to/run/bundle.json --open
+
+# If the repository has moved, locate its retained Git objects explicitly:
+npm run counterpatch -- replay --bundle /path/to/run/bundle.json --repo /new/path/to/repo --json
+```
+
+Replay uses the saved contract, probes, app path and Git tree IDs even if the current app has changed or been deleted. It preserves the checkout, index, current baseline and hook task state. It checks the bundle's schema and digest, requirement links, Git object types, app subtree relationships and manifests against the retained snapshots before executing app commands. Probes and contracts cannot be overridden during replay. The recorded browser step and network settling limits are restored.
+
+Every replay installs and builds in fresh directories under the new run's `environment-cache/` and uses fresh runtime databases. It writes a new bundle and report linked to the source bundle. JSON includes `replay.sourceBundle` and any `replay.executionDrift`; the terminal and HTML reports disclose differences in Node, platform, architecture, verifier code and dependency-lock identity. Replay uses verification's exit codes, including 1 when a retained regression is reproduced.
+
+The bundle remains a local audit record. It requires the retained source objects in a Git repository and executes app commands on the host. Inherited environment values are not recorded; package downloads, browser installations and external services can change. Fresh builds and recorded inputs make replay useful for reproducing findings, without guaranteeing identical execution or host isolation. The SHA-256 digest detects edits but does not authenticate a bundle's author. `clean` removes run directories but deliberately leaves Git snapshot refs intact; keep a copy of `bundle.json` to replay after cleaning.
+
+`npm run eval` runs the labeled decision cases in [test/fixtures/contract-cases.json](test/fixtures/contract-cases.json) and reports detection, false alarms and inconclusive results. This small deterministic corpus exercises decision rules; it does not estimate model quality or production accuracy. `npm run e2e` exercises the checkout example in a real browser.
+
+An inconclusive run still saves its evidence and report page, and `--open` opens it. The stop hook reports the inconclusive result and keeps the task and its original baseline open. Repair or add probes, then verify again.
+
+### Generate probes with OpenRouter
+
+Run these commands from the repository root. Set your key in the shell and choose an exact model ID from your provider's model catalog; no model is selected automatically. Environment files are not loaded automatically.
+
+After filling in `.env`, check your settings before generating probes:
+
+```sh
+npm run counterpatch -- check-model --env-file .env
+```
+
+This sends only a fixed test message, with at most 2048 output tokens (or your configured lower limit). It works without a Git repository or baseline and does not send source code, manifests, or task prompts. It reports whether the provider accepted the key and returned a model response, plus a separate JSON-output check. Exit 0 means the model responded; exit 2 indicates a configuration or request failure. A JSON warning means access works but generation may still fail. `--json` provides machine-readable results. This is one live model request and may use provider credits.
+
+`check-model`, `draft-contract`, and `generate` accept `--env-file .env`; file values override shell settings and `--model` / `--base-url` override both. The file is parsed as configuration, never executed as shell code.
+
+Alternatively, copy [`.env.example`](.env.example) to `.env`, fill in `OPENROUTER_API_KEY` and `COUNTERPATCH_MODEL`, and load it into your current shell before running the commands below. Local `.env` files are gitignored.
+
+```sh
+cp .env.example .env
+# Edit .env with your key and model ID, then:
+set -a
+. ./.env
+set +a
+```
+
+If you loaded `.env`, skip the two `export` lines below.
+
+```sh
+export OPENROUTER_API_KEY='your-api-key'
+export COUNTERPATCH_MODEL='your-provider-model-id'
+
+# Record before the coding task, then make the app change.
+npm run counterpatch -- snapshot
+
+# After the change, generate up to five probes. --probes supplies optional examples.
+npm run counterpatch -- generate --app demo-app \
+  --prompt "Add percentage coupons. Guest checkout must keep working, and displayed totals must equal charged totals." \
+  --probes probes/shop --count 5 --out /tmp/counterpatch-generation
+
+# Execute the generated probes and open their evidence report.
+npm run counterpatch -- verify --app demo-app \
+  --probes /tmp/counterpatch-generation/probes --open
+```
+
+Choose a fresh `--out` directory for each generation. Existing directories are never overwritten. Without `--out`, generations go inside the repository's Git state directory at `counterpatch/generations/<id>/`. Each generation contains `probes/*.json` and a separate `generation.json` recording the request, snapshot IDs, requested and returned model, response ID, duration, and token usage when provided. The CLI prints the next verification command. `--json` prints this metadata and the probes directory as JSON.
+
+The generator sends the explicit request, baseline and candidate manifests, selected JavaScript/TypeScript source, root app `package.json`, the diff for those files, and any supplied example probes. Source comes from Git snapshots, including untracked files. It excludes untracked gitignored files, `.env` files, other file types, and source under dependency/build/test directories. The diff is built from exactly the selected files on each side, including when a file becomes a directory or vice versa. Selected source or manifests can still contain sensitive values. Each side is limited to 100 source files, and combined context to 200,000 characters; exceeding a limit fails before the model request instead of silently dropping context.
+
+Generated JSON must pass the existing probe schema, have unique IDs, start with a local navigation, and contain only supported steps and valid expectations. The parser accepts a single JSON probe object surrounded by prose or Markdown fences and can strip completed leading `<think>` sections. It rejects incomplete or ambiguous answers and does not repair JSON syntax. One invalid probe rejects the entire batch and leaves no runnable output directory; the rejected response and model metadata are saved privately next to it as `<output>.failed-<id>.json`, with the path printed in the error. That file can contain generated app details; it excludes request headers and API credentials. Schema validation does not prove that a probe works; run `verify` to establish that. Hooks do not call the model automatically. The client makes one request without automatic retries.
+
+To switch to Nebius Token Factory:
+
+```sh
+export COUNTERPATCH_BASE_URL='https://api.tokenfactory.nebius.com/v1'
+export NEBIUS_API_KEY='your-nebius-key'
+export COUNTERPATCH_MODEL='your-nebius-model-id'
+```
+
+`--model` and `--base-url` override the corresponding environment settings. `COUNTERPATCH_API_KEY` overrides provider-specific keys and is required for other compatible endpoints. `COUNTERPATCH_MODEL_TIMEOUT_MS` defaults to 120000 and `COUNTERPATCH_MAX_TOKENS` defaults to 8192. Increase the token budget or lower `--count` if output is truncated. API URLs require HTTPS, with HTTP allowed for localhost testing. The client uses standard non-streaming chat completions with local JSON validation; provider-specific structured-output features are not required. See the [OpenRouter API reference](https://openrouter.ai/docs/api/reference/overview) and [Nebius API reference](https://api.tokenfactory.nebius.com/docs).
 
 A report looks like this (shortened):
 
@@ -72,7 +227,7 @@ COUNTERPATCH
 
 Probes run:              7
 Valid baseline probes:   5
-Discarded probes:        1
+Unverified on baseline:  1
 Candidate-only probes:   1
 
 ✗ Guest checkout completes an order  [guest-checkout]
@@ -89,9 +244,9 @@ Candidate-only probes:   1
 
 ### The report page
 
-Every completed run also writes `report.html` next to its evidence, and the terminal report ends with its path. It is one self-contained file with the screenshots embedded, so it can be opened directly or sent to someone.
+Every completed or inconclusive run also writes `report.html` next to its evidence, and the terminal report ends with its path. It is one self-contained file with the screenshots embedded, so it can be opened directly or sent to someone.
 
-The page leads with what was found, then shows each counterexample with the app before and after the change side by side and a table of what differed on the page, on the network and in the database. Counterexamples that end on the same unexpected page are grouped as one symptom, so one redirect seen by six probes reads as one finding. Probes that passed and probes that were discarded are listed below, collapsed.
+Without a contract, the page leads with what was found, then shows each counterexample with the app before and after the change side by side and a table of what differed on the page, on the network and in the database. Counterexamples that end on the same unexpected page are grouped as one symptom, so one redirect seen by six probes reads as one finding. Passing probes and probes that could not establish preservation appear below. With a contract, the page leads with requirement decisions and coverage gaps, with each linked probe's evidence underneath.
 
 Grouping is by symptom, not by cause: it says the probes ended in the same place, not that one defect is behind all of them.
 
@@ -106,7 +261,7 @@ Two hooks remove the manual steps, so the agent being checked has no say in when
 
 To switch them on, merge [examples/claude-code-hooks.json](examples/claude-code-hooks.json) into `.claude/settings.local.json` (your machine only) or `.claude/settings.json` (everyone who clones the repository). They are not enabled in this repository.
 
-A task starts at the first prompt of a session and ends when a verification finds no counterexample. Until then, follow-up prompts are judged against the same baseline, so "fix it" after a counterexample is still compared with the tree from before the original request. `counterpatch status` shows the open task. [What is stored, and where](#what-is-stored-and-where) lists what the hooks keep.
+A task starts at the first prompt of a session and ends after a conclusive verification with no counterexamples or candidate-only failures. Inconclusive runs keep the task open. Until then, follow-up prompts are judged against the same baseline, so "fix it" after a counterexample is still compared with the tree from before the original request. `counterpatch status` shows the open task. [What is stored, and where](#what-is-stored-and-where) lists what the hooks keep.
 
 Both hooks stay out of the agent's way:
 
@@ -116,14 +271,16 @@ Both hooks stay out of the agent's way:
 
 ## What is stored, and where
 
-Everything CounterPatch stores stays on the machine it runs on, and it sends none of it anywhere. The only network activity is the app's own install command fetching packages (`npm ci` for the demo shop) and the headless browser talking to the two local copies of the app. That changes when model calls are added: the prompts, the diff and the manifest will then be sent to the model provider.
+Verification artifacts stay on the machine. The optional `generate` command sends its explicit request and the app context described above to the configured model provider. `draft-contract` sends the explicitly selected request or captured task prompts. Keys are read from model configuration and are not written to generation or draft metadata. Running `verify` or the hooks does not make model calls; app install/build/runtime commands and the browser may use the network.
 
 **In the repository's git directory.** Nothing here is part of the working tree, so none of it can end up in a snapshot or a commit.
 
 | What | Written by | Contents | Kept until |
 | --- | --- | --- | --- |
 | `.git/counterpatch/prompts.jsonl` | prompt hook | Every prompt submitted in a session: full text, timestamp, session id. Created readable by the owner only. | Deleted by hand |
-| `.git/counterpatch/task.json` | prompt hook | Session id, start time and baseline commit of the open task | A verification finds no counterexample |
+| `.git/counterpatch/task.json` | prompt hook | Session id, start time and baseline commit of the open task | A conclusive verification finds no counterexample or candidate-only failure |
+| `.git/counterpatch/generations/<id>/` | `generate` without `--out` | Generated probes and generation metadata | Deleted by hand |
+| `.git/counterpatch/contract-drafts/<id>/` | `draft-contract` without `--out` | Selected prompts, draft requirements, quotes, questions and metadata | Deleted by hand |
 | `refs/counterpatch/baseline` | `snapshot`, prompt hook | A copy of every file in the working tree that is not gitignored, as git objects | The next baseline replaces it |
 | Unreferenced git objects | `verify`, `status`, stop hook | A snapshot of the current working tree, taken to compare with the baseline | Git's own garbage collection |
 
@@ -144,7 +301,7 @@ Everything CounterPatch stores stays on the machine it runs on, and it sends non
 | --- | --- | --- |
 | Prompt log | `.git/counterpatch/prompts.jsonl` | One JSON line per submitted prompt: time, session id, full text. Appended to; never rotated or trimmed. |
 | Task state | `.git/counterpatch/task.json` | The open task: session id, start time, baseline commit. Not a history; it is replaced or deleted as the task changes. |
-| Install and build log | `<home>/envs/<tree id>.prepare.log` | Output of the app's install and build commands for that snapshot, each preceded by a `$ command` line. Rewritten when the environment is prepared again; untouched when the environment is reused from the cache. |
+| Preparation log | `<home>/envs/<tree id>.prepare.log` | Output of the app's install, build-time database reset and build commands for that snapshot, each preceded by a `$ command` line. Rewritten when the environment is prepared again; untouched when the environment is reused from the cache. |
 | Control server log | `<home>/runs/<run id>/control.server.log` | Output of the database-reset command before each probe, then everything the pre-task app's server printed. |
 | Candidate server log | `<home>/runs/<run id>/candidate.server.log` | The same, for the app as it is now. |
 | Evidence | `<home>/runs/<run id>/report.json` | Every probe's verdict, steps that failed, expectations, and the full UI, network and database evidence from both sides. |
@@ -202,6 +359,8 @@ npx counterpatch clean
 
 **Environments.** `verify` snapshots the working tree again, then materializes both trees into separate directories keyed by tree id, runs each snapshot's install command, and builds. Completed environments are cached, so a later run against the same baseline reuses the control build. Dependencies are never copied from the checkout, where they may be stale even when the lockfile matches.
 
+Installation and building receive a private database path (`.counterpatch-build.sqlite` inside the snapshot directory); the database is seeded before the build. Running apps use separate databases in the run directory. A lock per tree coordinates preparation across CLI processes, and the cache becomes ready only after all preparation succeeds. Older caches without build-time database isolation are rebuilt. Command timeouts and CLI interruption terminate subprocess groups and release preparation locks. A forced termination such as `SIGKILL` can leave a stale lock; the lock timeout identifies its path for removal once no run is active.
+
 **Probes.** Each probe runs on both sides from a freshly seeded database and a fresh browser context. A probe is data, not code: a fixed set of steps (`goto`, `click`, `fill`, `waitFor`, `waitForUrl`, `capture`) and expectations over the evidence. See [probes/shop/](probes/shop/) for examples and [src/probe.ts](src/probe.ts) for the schema.
 
 **Evidence.** Every run records three things, in a form that compares cleanly between the two sides:
@@ -222,7 +381,7 @@ Expectations address evidence by path and can compare one observation with anoth
 | --- | --- | --- | --- |
 | held | pass | pass | Behaviour preserved. Evidence that changed anyway is flagged. |
 | diverged | pass | fail | A counterexample. |
-| discarded | fail | — | The probe is wrong, so it is thrown away. |
+| discarded (legacy JSON label) | fail | pass or fail | Preservation is unverified; the baseline may have an existing defect or the probe may be invalid. |
 | candidate-only | not run | pass or fail | The probe exercises behaviour that only exists after the change. |
 
 A candidate-only failure has no baseline to validate the probe against, so it is reported separately from a counterexample.
@@ -235,11 +394,28 @@ The app under test declares how to run it and what can be observed in `counterpa
 
 Each side is run with its own copy of the manifest, so a change that alters the schema is observed with its own queries.
 
+Optional command deadlines are specified in milliseconds. These are the defaults; omit any field to keep its default:
+
+```json
+"timeouts": {
+  "installMs": 300000,
+  "buildMs": 300000,
+  "resetDatabaseMs": 60000
+}
+```
+
+`readiness.timeoutMs` separately limits how long the started app has to return a successful readiness response (default 60000 ms). A command timeout is reported with its phase and log path.
+
 ## Layout
 
 | Path | Contents |
 | --- | --- |
 | [src/snapshot.ts](src/snapshot.ts) | Baseline and candidate snapshots, tree materialization |
+| [src/contract.ts](src/contract.ts) | Task contracts, probe links, requirement assessments and coverage gaps |
+| [src/draft-contract.ts](src/draft-contract.ts) | Model contract drafts, quoted request evidence and unresolved questions |
+| [src/bundle.ts](src/bundle.ts) | Verification input capture, hashes and retained Git snapshot references |
+| [src/generate.ts](src/generate.ts) | Snapshot context, generation instructions, probe validation and saving |
+| [src/model.ts](src/model.ts) | Configurable chat-completions client for OpenRouter and compatible providers |
 | [src/env.ts](src/env.ts) | Preparing, starting and stopping an environment |
 | [src/runner.ts](src/runner.ts) | Running one probe in a browser and collecting evidence |
 | [src/evidence.ts](src/evidence.ts) | Evidence paths, expectations, differences |

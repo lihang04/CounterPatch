@@ -1,0 +1,7 @@
+{
+  "id": "guest-access",
+  "title": "Checkout remains available to guests",
+  "requirementId": "checkout-access",
+  "steps": [{ "do": "goto", "path": "/checkout" }],
+  "expect": [{ "path": "ui.url", "equals": "/checkout" }]
+}

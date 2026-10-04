@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "title": "Require login when visiting checkout",
+  "requirements": [
+    {
+      "id": "checkout-access",
+      "kind": "change",
+      "description": "Guests visiting checkout are redirected to login."
+    }
+  ],
+  "exclusions": ["Coupon pricing", "Signed-in checkout behavior; this example only checks guest access"]
+}

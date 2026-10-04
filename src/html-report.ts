@@ -1,14 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { HTML_REPORT_FILE, failureReasons } from "./report.ts";
+import { HTML_REPORT_FILE, INCONCLUSIVE_MESSAGE, contractHeadline, failureReasons } from "./report.ts";
 import type { ProbeRun } from "./runner.ts";
-import type { ProbeResult, Report } from "./verify.ts";
+import type { ProbeResult, RunReport } from "./verify.ts";
 
 // A single self-contained page for one verification run: no server,
 // screenshots embedded, so the file can be opened or shared as is. It reads
 // fully without JavaScript; the one script only enlarges screenshots.
-
-type CompletedReport = Extract<Report, { outcome: "completed" }>;
 
 // Screenshot path -> base64 PNG.
 export type Screenshots = Map<string, string>;
@@ -32,6 +30,13 @@ function esc(value: unknown): string {
 
 function plural(count: number, one: string, many = `${one}s`): string {
   return `${count} ${count === 1 ? one : many}`;
+}
+
+function replayNote(report: RunReport): string {
+  if (!report.replay) return "";
+  const fields = report.replay.executionDrift.map((change) => esc(change.field));
+  return `<p>Replay of ${esc(report.replay.sourceBundle.path)}<br>Source SHA-256: ${esc(report.replay.sourceBundle.sha256)}
+    ${fields.length ? `<br>Execution settings changed: ${fields.join(", ")}. See report.json for recorded and current values.` : ""}</p>`;
 }
 
 // Counterexamples that land on the same unexpected page are one symptom seen
@@ -175,7 +180,10 @@ function symptomSection(group: SymptomGroup, screenshots: Screenshots): string {
   </section>`;
 }
 
-function headline(report: CompletedReport, groups: SymptomGroup[], unvalidated: number): { title: string; detail: string; tone: string } {
+function headline(report: RunReport, groups: SymptomGroup[], unvalidated: number): { title: string; detail: string; tone: string } {
+  if (report.outcome === "inconclusive") {
+    return { tone: "warn", title: "Verification inconclusive.", detail: INCONCLUSIVE_MESSAGE };
+  }
   const diverged = groups.reduce((sum, group) => sum + group.results.length, 0);
   if (diverged > 0) {
     const noBaseline = unvalidated > 0 ? ` ${plural(unvalidated, "more probe")} failed with no baseline to compare against.` : "";
@@ -359,7 +367,8 @@ document.addEventListener("click", (event) => {
 });
 `;
 
-export function renderHtmlReport(report: CompletedReport, screenshots: Screenshots): string {
+export function renderHtmlReport(report: RunReport, screenshots: Screenshots): string {
+  if (report.assessment) return renderContractReport(report, screenshots);
   const { results } = report;
   const diverged = results.filter((result) => result.verdict === "diverged");
   const unvalidated = results.filter((result) => result.verdict === "candidate-only-failed");
@@ -418,8 +427,8 @@ export function renderHtmlReport(report: CompletedReport, screenshots: Screensho
         </details>`
       : "",
     discarded.length > 0
-      ? `<details>
-          <summary>Discarded <span class="count">${plural(discarded.length, "probe")} failed on the app before the change, so the probe is wrong</span></summary>
+      ? `<details${report.outcome === "inconclusive" ? " open" : ""}>
+          <summary>Unverified preservation <span class="count">${plural(discarded.length, "probe")} failed on baseline; may be an existing defect or an invalid probe</span></summary>
           <div class="reveal"><ul class="rows">${discardedList}</ul></div>
         </details>`
       : "",
@@ -449,7 +458,7 @@ export function renderHtmlReport(report: CompletedReport, screenshots: Screensho
     <dl class="stats">
       <div><dt>Probes run</dt><dd>${results.length}</dd></div>
       <div><dt>Valid on the app before the change</dt><dd>${differential - discarded.length}</dd></div>
-      <div><dt>Discarded</dt><dd>${discarded.length}</dd></div>
+      <div><dt>Unverified on baseline</dt><dd>${discarded.length}</dd></div>
       <div><dt>New behaviour only</dt><dd>${results.length - differential}</dd></div>
     </dl>
   </section>
@@ -457,14 +466,47 @@ export function renderHtmlReport(report: CompletedReport, screenshots: Screensho
   ${noBaseline}
   <section>${lists}</section>
 </main>
-<footer>Full evidence, server logs and databases for this run: ${esc(report.runDir)}</footer>
+<footer>${replayNote(report)}Full evidence, server logs and databases for this run: ${esc(report.runDir)}</footer>
 <script>${SCRIPT}</script>
 </body>
 </html>
 `;
 }
 
-export async function writeHtmlReport(report: CompletedReport): Promise<string> {
+function renderContractReport(report: RunReport, screenshots: Screenshots): string {
+  const assessment = report.assessment!;
+  const headline = contractHeadline(assessment);
+  const requirements = assessment.requirements.map((entry) => {
+    const tone = entry.status === "met" ? "pass" : entry.status === "unmet" ? "fail" : "warn";
+    return `<section>
+      <h2><span class="state state-${tone}">${esc(entry.status)}</span> ${esc(entry.requirement.description)}</h2>
+      <p class="note">${esc(entry.requirement.kind)} · ${esc(entry.requirement.id)}</p>
+      ${entry.probes.length === 0 ? '<p class="note">No probes cover this requirement.</p>' : ""}
+      ${entry.probes.map((probe) => {
+        const result = report.results.find((r) => r.probe.id === probe.probeId);
+        return `<details${entry.status !== "met" ? " open" : ""}>
+          <summary>${esc(probe.decision)}: ${esc(result?.probe.title ?? probe.probeId)}</summary>
+          <div class="reveal"><p>${esc(probe.reason)}</p>
+            <p class="note">Observed: ${esc(probe.observation)}. Before and after show the same probe's expectations; requested new behavior may fail on the baseline.</p>
+            ${result ? probeBlock(result, screenshots, "h3") : ""}
+          </div>
+        </details>`;
+      }).join("")}
+    </section>`;
+  }).join("");
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CounterPatch report: ${esc(headline.title)}</title><style>${STYLE}</style></head><body>
+<header class="top"><span class="mark">CounterPatch</span><span class="meta">${esc(assessment.contract.title)}</span></header>
+<main><section class="verdict tone-${headline.tone}"><h1>${esc(headline.title)}</h1><p class="detail">${esc(headline.detail)}</p></section>
+${requirements}
+${assessment.contract.exclusions.length ? `<section><h2>Outside this task's scope</h2><ul>${assessment.contract.exclusions.map((e) => `<li>${esc(e)}</li>`).join("")}</ul></section>` : ""}
+<section><details><summary>Files changed (${report.changed.length})</summary><ul class="files">${report.changed.map((f) => `<li><span>${esc(f.status)}</span>${esc(f.path)}</li>`).join("")}</ul></details></section>
+</main><footer>${replayNote(report)}Evidence: ${esc(report.runDir)}${report.bundle ? `<br>Verification bundle: ${esc(report.bundle.path)}<br>SHA-256: ${esc(report.bundle.sha256)}` : ""}</footer>
+<script>${SCRIPT}</script></body></html>`;
+}
+
+export async function writeHtmlReport(report: RunReport): Promise<string> {
   const screenshots: Screenshots = new Map();
   for (const result of report.results) {
     for (const run of [result.control, result.candidate]) {

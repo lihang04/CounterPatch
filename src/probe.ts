@@ -60,6 +60,7 @@ const ProbeSchema = z.strictObject({
   id: z.string().regex(/^[a-z0-9][a-z0-9-]*$/),
   title: z.string().min(1),
   description: z.string().optional(),
+  requirementId: z.string().regex(/^[a-z0-9][a-z0-9-]*$/).optional(),
   // Exercises behaviour that only exists after the change, so there is no
   // baseline to validate the probe against. Reported separately.
   candidateOnly: z.boolean().default(false),
@@ -70,6 +71,12 @@ const ProbeSchema = z.strictObject({
 export type Step = z.infer<typeof StepSchema>;
 export type Expectation = z.infer<typeof ExpectationSchema>;
 export type Probe = z.infer<typeof ProbeSchema>;
+
+// The same structural schema is sent to the generator; parseProbe also checks
+// refinements (valid evidence paths, regexes, and exactly one comparison).
+export function probeJsonSchema(): Record<string, unknown> {
+  return z.toJSONSchema(ProbeSchema, { io: "input" });
+}
 
 export function parseProbe(json: unknown, source: string): Probe {
   const parsed = ProbeSchema.safeParse(json);

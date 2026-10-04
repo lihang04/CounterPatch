@@ -88,6 +88,20 @@ async function main() {
     assert.match(report, /AFTER {3}failed — ended on \/login/);
     assert.match(await status(), /Open task: session e2e-session/);
 
+    // Only broken probes: CLI callers get exit 3, while hooks stay nonblocking
+    // and preserve the task until a usable verification completes.
+    const brokenProbe = path.join(fixtures, "probes", "broken-probe.json");
+    const inconclusive = await run(["verify", "--repo", repo, "--probes", brokenProbe, "--json"], "");
+    assert.equal(inconclusive.code, 3);
+    assert.equal(JSON.parse(inconclusive.stdout).outcome, "inconclusive");
+    const taskPath = path.join(repo, ".git", "counterpatch", "task.json");
+    const taskBefore = await fs.readFile(taskPath, "utf8");
+    const inconclusiveStop = await run(["hook", "stop", "--probes", brokenProbe], { ...session, hook_event_name: "Stop" });
+    assert.equal(inconclusiveStop.code, 0);
+    assert.match(userMessage(inconclusiveStop.stdout), /Verification inconclusive/);
+    assert.doesNotMatch(userMessage(inconclusiveStop.stdout), /No counterexample discovered/);
+    assert.equal(await fs.readFile(taskPath, "utf8"), taskBefore);
+
     // The change is replaced by a harmless one; the next stop finds nothing and ends the task.
     await git("apply", "--reverse", buggyPatch);
     await fs.appendFile(path.join(repo, "app", "globals.css"), "\n/* harmless */\n");

@@ -1,0 +1,12 @@
+[
+  { "id": "requested-login-gate", "kind": "change", "before": "/checkout", "after": "/login", "expect": "/login", "status": "met", "decision": "fulfilled" },
+  { "id": "guest-checkout-regression", "kind": "preserve", "before": "/checkout", "after": "/login", "expect": "/checkout", "status": "unmet", "decision": "regression" },
+  { "id": "harmless-checkout-refactor", "kind": "preserve", "before": "/checkout", "after": "/checkout", "expect": "/checkout", "status": "met", "decision": "preserved" },
+  { "id": "requested-gate-not-implemented", "kind": "change", "before": "/checkout", "after": "/checkout", "expect": "/login", "status": "unmet", "decision": "unfulfilled" },
+  { "id": "existing-checkout-defect", "kind": "preserve", "before": "/login", "after": "/login", "expect": "/checkout", "status": "inconclusive", "decision": "inconclusive" },
+  { "id": "repaired-baseline-defect", "kind": "preserve", "before": "/login", "after": "/checkout", "expect": "/checkout", "status": "inconclusive", "decision": "inconclusive" },
+  { "id": "new-report-route", "kind": "change", "before": "/404", "after": "/reports", "expect": "/reports", "status": "met", "decision": "fulfilled" },
+  { "id": "new-route-candidate-only", "kind": "change", "before": null, "after": "/reports", "expect": "/reports", "status": "met", "decision": "fulfilled" },
+  { "id": "new-route-missing", "kind": "change", "before": null, "after": "/404", "expect": "/reports", "status": "unmet", "decision": "unfulfilled" },
+  { "id": "invalid-checkout-expectation", "kind": "preserve", "before": "/checkout", "after": "/checkout", "expect": "/nonexistent", "status": "inconclusive", "decision": "inconclusive" }
+]

@@ -1,0 +1,7 @@
+{
+  "id": "login-required",
+  "title": "Checkout redirects guests to login",
+  "requirementId": "checkout-access",
+  "steps": [{ "do": "goto", "path": "/checkout" }],
+  "expect": [{ "path": "ui.url", "equals": "/login" }]
+}
